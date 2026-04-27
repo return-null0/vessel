@@ -10,37 +10,73 @@ ROOTFS_DIR = "/tmp/vessel-root"
 TARBALL_PATH = "/tmp/alpine-rootfs.tar.gz"
 
 def provision_rootfs():
-    print(f"Starting Vessel provisioning with Alpine {ALPINE_VERSION}...")
+    print("Starting Vessel provisioning...")
 
-    # Step 1: Clean 
     if os.path.exists(ROOTFS_DIR):
-        print(f"Wiping existing filesystem at {ROOTFS_DIR}...")
         shutil.rmtree(ROOTFS_DIR)
     os.makedirs(ROOTFS_DIR)
 
-    # Step 2: Download the tarball
-    print(f"Downloading root filesystem from {TARBALL_URL}...")
+    print("Downloading root filesystem...")
     urllib.request.urlretrieve(TARBALL_URL, TARBALL_PATH)
-    print("Download complete.")
 
-    # Step 3: Extract using the kernel's native tar binary
-    print(f"Extracting file hierarchy to {ROOTFS_DIR} using native tar...")
+    print("Extracting file hierarchy...")
+    subprocess.run(["tar", "-xzf", TARBALL_PATH, "-C", ROOTFS_DIR], check=True)
+    os.remove(TARBALL_PATH)
+
+    print("Injecting custom profile configuration...")
+    profile_dir = os.path.join(ROOTFS_DIR, "root")
+    os.makedirs(profile_dir, exist_ok=True)
+    with open(os.path.join(profile_dir, ".profile"), "w") as f:
+        print(r"export PS1='\033[1;32mvessel\033[0m:\033[1;34m\w\033[0m# '", file=f)
+
+    print("Injecting universal DNS configuration...")
+    # Step 4: Build-Phase Software Injection
+    print("Injecting host-mirrored DNS configuration...")
+    resolv_dir = os.path.join(ROOTFS_DIR, "etc")
+    os.makedirs(resolv_dir, exist_ok=True)
+    resolv_target = os.path.join(resolv_dir, "resolv.conf")
+    
+    # Dynamically locate the host's true DNS configuration
+    host_resolv_paths = [
+        "/run/systemd/resolve/resolv.conf", 
+        "/run/systemd/resolve/stub-resolv.conf", 
+        "/etc/resolv.conf"
+    ]
+    
+    host_resolv = None
+    for path in host_resolv_paths:
+        if os.path.exists(path):
+            host_resolv = path
+            break
+            
+    if host_resolv:
+        # Read the raw text to avoid copying broken symlinks
+        with open(host_resolv, "r") as src, open(resolv_target, "w") as dst:
+            dst.write(src.read())
+    else:
+        # Ultimate fallback to systemd local stub
+        with open(resolv_target, "w") as f:
+            f.write("nameserver 127.0.0.53\n")
+
+    print("Executing chroot package installation (Requires Host Network)...")
     try:
         subprocess.run(
-            ["tar", "-xzf", TARBALL_PATH, "-C", ROOTFS_DIR],
-            check=True,
-            capture_output=True,
-            text=True
+            ["chroot", ROOTFS_DIR, "apk", "update"],
+            check=True
+        )
+        subprocess.run(
+            ["chroot", ROOTFS_DIR, "apk", "add", "vim"],
+            check=True
         )
     except subprocess.CalledProcessError as e:
-        print(f"Fatal OS error during extraction. Kernel reported:\n{e.stderr}")
+        print(f"Fatal error during package injection. Kernel reported:\n{e.stderr}")
         exit(1)
-    
-    # Step 4: Cleanup
-    print("Removing temporary tarball...")
-    os.remove(TARBALL_PATH)
-    
-    print(f"Provisioning successful. The sandbox at {ROOTFS_DIR} is ready for chroot.")
+
+    print("Cleaning up temporary DNS configuration...")
+    os.remove(resolv_target)
+
+    print("Provisioning successful.")
 
 if __name__ == "__main__":
     provision_rootfs()
+
