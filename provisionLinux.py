@@ -68,6 +68,11 @@ def provision_rootfs():
             ["chroot", ROOTFS_DIR, "apk", "add", "vim"],
             check=True
         )
+
+        subprocess.run(
+            ["chroot", ROOTFS_DIR, "apk", "add", "mc"],
+            check=True
+        )
     except subprocess.CalledProcessError as e:
         print(f"Fatal error during package injection. Kernel reported:\n{e.stderr}")
         exit(1)
