@@ -5,14 +5,19 @@ A minimal Linux container engine designed to demonstrate the fundamentals of OS-
 Vessel bypasses high-level abstractions like Docker or containerd to interface directly with the Linux kernel. It constructs isolated environments using raw system calls, kernel namespaces, and control groups. This project serves as a bare-metal implementation of a container runtime, proving that containers are simply a specific configuration of native Linux security features rather than standalone virtual machines.
 
 ## Core Architecture and Execution Flow
-The engine relies on a physically separated build-and-run architecture, utilizing distinct Linux kernel mechanisms spread across three primary scripts to establish an impenetrable container boundary.
+The engine relies on a physically separated build-and-run architecture, utilizing distinct Linux kernel mechanisms spread across four primary components to establish an impenetrable container boundary with real-time telemetry.
 
 1. Build-Phase Software Injection `provisionLinux.py`
-This script acts as the infrastructure compiler. It provisions an Alpine Linux Mini Root Filesystem, dynamically mirrors the host machine's DNS routing configuration, and handles the compilation and injection of external software (such as Vim and Midnight Commander) directly into the static filesystem image before runtime isolation occurs.
+This script acts as the infrastructure compiler. It provisions an Alpine Linux Mini Root Filesystem, dynamically mirrors the host machine's DNS routing configuration, and handles the compilation and injection of external software directly into the static filesystem image before runtime isolation occurs.
 2. Resource Caging & Initialization `vessel-launcher.sh`
-This shell script serves as the resource manager and execution entry point. It interfaces directly with the host kernel's /sys/fs/cgroup pseudo-filesystem to construct the sandbox environment. It performs legacy state cleanup, applies strict hardware ceilings for CPU time slices and PID limits to prevent resource exhaustion, and securely locks its own process into the cgroup tree before handing execution over to the Python engine.
-3. Synchronized Double-Fork Isolation `vessel.py`
-The final runtime engine utilizes a Double-Fork and Namespace Unshare pattern to transition from the host environment into the isolated container without mutating the original caller.
+This shell script serves as the resource manager and execution entry point. It interfaces directly with the host kernel's Cgroup v2 pseudo-filesystem to construct the sandbox environment. It performs legacy state cleanup, applies strict hardware ceilings for CPU time slices, and securely locks its own process into the cgroup tree before handing execution over to the Python engine.
+3. Triple-Fork Isolation & Supervisor Pattern  `vessel.py`
+The runtime engine utilizes a synchronized multi-fork pattern to transition from the host environment into the isolated container without mutating the original caller. The Master Process forks a namespace manager to protect the host terminal. The Middle Child executes the unshare system call with namespace flags to sever kernel relationships. Finally, the Grandchild crosses the boundary to become PID 1, mounts the private filesystems, and forks one last time. This final fork separates the persistent Python Supervisor from the ephemeral interactive shell payload.
+
+4. Asynchronous Telemetry & Kernel IPC `telemetryTask.py`
+A native POSIX thread is spawned directly into the container's PID 1 memory space using ctypes and NPTL, operating independently of the Python Global Interpreter Lock. This watcher thread applies a kernel-level signal mask and enters a zero-CPU wait state using sigwait. Upon trapping a SIGUSR1 hardware interrupt from the host, it dynamically resolves its Cgroup v2 location via procfs and dumps real-time memory and CPU telemetry directly to the container's standard output.
+
+
 
 • The Manager Process: Forks a supervisor and waits for its completion. This ensures the host's terminal state is preserved and the main script remains a "clean" host citizen.
 
@@ -26,4 +31,6 @@ Executing this engine requires a native Linux environment or a lightweight hyper
 1.	Clone this repository to your Linux host environment.
 2.	Execute `sudo python3 provisionLinux.py` to download the core filesystem, mirror the host DNS, compile Vim, and prepare the static container image at /tmp/vessel-root.
 3.	Launch the runtime engine by executing the resource wrapper via `sudo ./vessel-launcher.sh`.
-4.	Verify your isolation by running ps x inside the spawned login shell to confirm your process is operating as PID 1, and execute vim to verify your software injection succeeded.
+4.	Verify your isolation by running ```ps x``` inside the spawned login shell to confirm your supervisor is operating as PID 1 and your shell as a child payload.
+5.	Test the asynchronous kernel IPC by opening a second host terminal, locating the supervisor's host PID using ```ps -ef | grep vessel.py```, and executing `sudo kill -10 [PID]`.
+6.	Return to your container terminal to observe the real-time Cgroup v2 telemetry dump triggered by the host interrupt.
