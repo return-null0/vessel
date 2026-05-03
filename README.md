@@ -1,5 +1,35 @@
 # Vessel
 A minimal Linux container engine designed to demonstrate the fundamentals of OS-level virtualization.
+<details>
+<summary><b>View Photo 1: Resource Caging & Host Handshake</b></summary>
+
+<img src="pics/pic1.png" width="800px">
+
+The initial execution phase anchors the engine to the hardware. Before the Python supervisor boots, the shell wrapper carves out a sanctuary in the Cgroup v2 unified hierarchy.
+
+**Key Detail:** Notice the cpu.stat dump. This confirms the kernel is actively tracking execution microseconds and enforcing the 100000 / 100000 quota (100% of a single core).
+</details>
+
+<details>
+<summary><b>View Photo 2: Namespace Mapping & Identity</b></summary>
+
+<img src="pics/pic2.png" width="800px">
+
+By inspecting the kernel status of the process tasks, we can verify the physical separation of the container's identity from the host.
+
+**Key Detail:** The NSpid: 7 entry proves the kernel is mapping a host-side process to a local namespace ID, effectively blinding the container to the host's existence.
+</details>
+
+<details>
+<summary><b>View Photo 3: Asynchronous Telemetry & IPC</b></summary>
+
+<img src="pics/pic3.png" width="800px">
+
+The final architectural pillar is the Asynchronous Heartbeat. This demonstrates a persistent, non-blocking telemetry channel that survives the execvp payload swap.
+
+**Key Detail:** The Ghost Processes count of 2 reveals the invisible host anchors (the Manager and Bridge) that are still technically part of this cgroup, providing a 360-degree view of the sandbox's resource footprint.
+</details>
+
 
 ## Overview
 Vessel bypasses high-level abstractions like Docker or containerd to interface directly with the Linux kernel. It constructs isolated environments using raw system calls, kernel namespaces, and control groups. This project serves as a bare-metal implementation of a container runtime, proving that containers are simply a specific configuration of native Linux security features rather than standalone virtual machines.
@@ -34,3 +64,4 @@ Executing this engine requires a native Linux environment or a lightweight hyper
 4.	Verify your isolation by running ```ps x``` inside the spawned login shell to confirm your supervisor is operating as PID 1 and your shell as a child payload.
 5.	Test the asynchronous kernel IPC by opening a second host terminal, locating the supervisor's host PID using ```ps -ef | grep vessel.py```, and executing `sudo kill -10 [PID]`.
 6.	Return to your container terminal to observe the real-time Cgroup v2 telemetry dump triggered by the host interrupt.
+
