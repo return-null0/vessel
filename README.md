@@ -65,3 +65,5 @@ Executing this engine requires a native Linux environment or a lightweight hyper
 5.	Test the asynchronous kernel IPC by opening a second host terminal, locating the supervisor's host PID using ```ps -ef | grep vessel.py```, and executing `sudo kill -10 [PID]`.
 6.	Return to your container terminal to observe the real-time Cgroup v2 telemetry dump triggered by the host interrupt.
 
+### Optional Fun
+7.   [Connect to the internet](vethernet.md) by bridging the container's isolated network namespace to the host using a veth pair on a private shared subnet, and routing the outbound traffic through the host's kernel via Network Address Translation masquerading
