@@ -44,6 +44,27 @@ def signal_watcher_callback(arg):
                             print(f"  -> CPU Time:  {cpu_sec:.4f} Seconds")
                             break
             
+                # 4. Read PID Telemetry
+                with open(f"{cgroup_path}/pids.current", "r") as f:
+                    pid_count = int(f.read().strip())
+                    print(f"  -> PID Count ")
+
+                # 4. Read Execution Telemetry
+                #this one includes threads!
+                with open(f"{cgroup_path}/pids.current", "r") as f:
+                    total_execution_contexts = int(f.read().strip())
+
+                with open(f"{cgroup_path}/cgroup.procs", "r") as f:
+                    pids = [int(line.strip()) for line in f.readlines() if line.strip()]
+                    local_pids = [pid for pid in pids if pid > 0]
+                    ghost_count = pids.count(0)
+                    
+                    print(f"  -> Total Threads/Tasks: {total_execution_contexts}")
+                    print(f"  -> PID Topology: {len(pids)} Main Processes")
+                    print(f"       Local Processes: {len(local_pids)} {local_pids}")
+                    print(f"       Ghost Processes: {ghost_count} (Invisible host scope)")
+
+                    
             except FileNotFoundError as e:
                 print(f"  -> [Error] Telemetry file missing: {e}")
             except Exception as e:
