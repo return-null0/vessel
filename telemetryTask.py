@@ -9,15 +9,15 @@ def signal_watcher_callback(arg):
     libc.sigemptyset(ctypes.byref(sig_set))
     libc.sigaddset(ctypes.byref(sig_set), 10) 
 
-    print("[Thread] Signal Watcher PARKED. Waiting for SIGUSR1 (10)...")
+    print("[Thread] Signal Watcher PARKED. Waiting for SIGUSR1 (10)...", flush=True)
     
     sig_received = ctypes.c_int(0)
     while True:
         res = libc.sigwait(ctypes.byref(sig_set), ctypes.byref(sig_received))
         
         if res == 0 and sig_received.value == 10:
-            print("\n[Thread] EVENT: SIGUSR1 trapped by background watcher!")
-            print("[Thread] Resolving dynamic cgroup path...")
+            print("\r\n[Thread] EVENT: SIGUSR1 trapped by background watcher!", flush=True)
+            print("[Thread] Resolving dynamic cgroup path...", flush=True)
             
             try:
                 # 1. Dynamically read the container's cgroup location
@@ -26,13 +26,13 @@ def signal_watcher_callback(arg):
                 
                 # 2. Construct the absolute path
                 cgroup_path = f"/sys/fs/cgroup{cgroup_suffix}"
-                print(f"[Thread] Target Path: {cgroup_path}")
+                print(f"[Thread] Target Path: {cgroup_path}", flush=True)
                 
                 # 3. Read Memory Telemetry
                 with open(f"{cgroup_path}/memory.current", "r") as f:
                     mem_bytes = int(f.read().strip())
                     mem_mb = mem_bytes / (1024 * 1024)
-                    print(f"  -> RAM Usage: {mem_mb:.2f} MB")
+                    print(f"  -> RAM Usage: {mem_mb:.2f} MB", flush=True)
                 
                 # 4. Read CPU Telemetry
                 with open(f"{cgroup_path}/cpu.stat", "r") as f:
@@ -41,13 +41,8 @@ def signal_watcher_callback(arg):
                         if line.startswith("usage_usec"):
                             cpu_usec = int(line.split()[1])
                             cpu_sec = cpu_usec / 1_000_000
-                            print(f"  -> CPU Time:  {cpu_sec:.4f} Seconds")
+                            print(f"  -> CPU Time:  {cpu_sec:.4f} Seconds", flush=True)
                             break
-            
-                # 4. Read PID Telemetry
-                with open(f"{cgroup_path}/pids.current", "r") as f:
-                    pid_count = int(f.read().strip())
-                    print(f"  -> PID Count ")
 
                 # 4. Read Execution Telemetry
                 #this one includes threads!
@@ -59,10 +54,10 @@ def signal_watcher_callback(arg):
                     local_pids = [pid for pid in pids if pid > 0]
                     ghost_count = pids.count(0)
                     
-                    print(f"  -> Total Threads/Tasks: {total_execution_contexts}")
-                    print(f"  -> PID Topology: {len(pids)} Main Processes")
-                    print(f"       Local Processes: {len(local_pids)} {local_pids}")
-                    print(f"       Ghost Processes: {ghost_count} (Invisible host scope)")
+                    print(f"  -> Total Threads/Tasks: {total_execution_contexts}", flush=True)
+                    print(f"  -> PID Topology: {len(pids)} Processes", flush=True)
+                    print(f"       Local Processes: {len(local_pids)} {local_pids}", flush=True)
+                    print(f"       Ghost Processes: {ghost_count} (Invisible host scope)", flush=True)
 
                     
             except FileNotFoundError as e:
