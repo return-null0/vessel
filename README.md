@@ -17,7 +17,7 @@ The initial execution phase anchors the engine to the hardware. Before the Pytho
 
 By inspecting the kernel status of the process tasks, we can verify the physical separation of the container's identity from the host.
 
-**Key Detail:** The NSpid: 7 entry proves the kernel is mapping a host-side process to a local namespace ID, effectively blinding the container to the host's existence.
+**Key Detail:** The NSpid 7 entry shows the kernel has re-indexed the background telemetry thread to a local ID of 7, independent of its actual PID on the host. This confirms the PID namespace is active, allowing us to target this specific thread for telemetry interrupts without conflict, while ensuring the container remains strictly isolated from the host's global process table.
 </details>
 
 <details>
