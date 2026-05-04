@@ -3,6 +3,13 @@
 # Vessel Runtime Engine - Resource Allocation Wrapper
 # Must be executed with root privileges (sudo)
 
+MODE="shell"
+if [ "$1" = "sql" ]; then
+    MODE="sql"
+fi
+
+
+
 CGROUP_NAME="vessel_sandbox"
 CGROUP_ROOT="/sys/fs/cgroup"
 CAGE_PATH="$CGROUP_ROOT/$CGROUP_NAME"
@@ -48,4 +55,4 @@ echo $$ > "$CAGE_PATH/cgroup.procs"
 echo "Resource limits active. Entering container namespace..."
 echo "------------------------------------------------------"
 
-exec python3 vessel.py
+exec python3 vessel.py "$MODE"

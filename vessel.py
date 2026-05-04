@@ -11,97 +11,153 @@ def launch_vessel():
 
     libc = ctypes.CDLL(None)
     
-    # Define Linux clone flags for namespace isolation
-    CLONE_NEWNS  = 0x00020000  # Mount namespace
-    CLONE_NEWPID = 0x20000000  # PID namespace
-    CLONE_NEWNET = 0x40000000  # Network namespace
+    mode = sys.argv[1]
+
+    CLONE_NEWNS  = 0x00020000  
+    CLONE_NEWPID = 0x20000000  
+    CLONE_NEWNET = 0x40000000  
     flags = CLONE_NEWNS | CLONE_NEWPID | CLONE_NEWNET
     
-    # 1. FORK THE NAMESPACE BRIDGE (Middle Child)
-    # The Host Manager stays behind to anchor the terminal and catch the exit code.
+    # Create two pipes to synchronize the network handoff
+    # ns_pipe: Bridge tells Host namespace is unshared and ready
+    # net_pipe: Host tells Bridge cable is injected, proceed
+    ns_r, ns_w = os.pipe()
+    net_r, net_w = os.pipe()
 
-
-
+    # 1. FORK THE NAMESPACE BRIDGE
     bridge_pid = os.fork()
+    
     if bridge_pid > 0:
+        # --- HOST MANAGER ---
+        os.close(ns_w)
+        os.close(net_r)
+
+        # Block the Host Manager until the Bridge unshares its namespace
+        os.read(ns_r, 1)
+        os.close(ns_r)
+
+        print(f"[Host Manager] Namespace detected at PID {bridge_pid}. Injecting network...", flush=True)
+        
+        subprocess.run(["ip", "link", "add", "v-host", "type", "veth", "peer", "name", "v-guest"], check=True)
+        subprocess.run(["ip", "link", "set", "v-guest", "netns", str(bridge_pid)], check=True)
+        subprocess.run(["ip", "addr", "add", "10.0.0.1/24", "dev", "v-host"], check=True)
+        subprocess.run(["ip", "link", "set", "v-host", "up"], check=True)
+
+        # Unblock the Bridge so it can configure its side of the cable
+        os.write(net_w, b"N")
+        os.close(net_w)
+
         os.waitpid(bridge_pid, 0)
         print("[Host Manager] Vessel execution concluded. Returning control to host.", flush=True)
         return
 
+    # --- BRIDGE PROCESS ---
+    os.close(ns_r)
+    os.close(net_w)
+
     # 2. SEVER KERNEL TIES
-    # The Bridge process detaches from the host's namespaces via unshare.
     if libc.unshare(flags) != 0:
-        print("[Bridge] FATAL: Failed to unshare kernel namespaces. Root privileges (sudo) required.", flush=True)
+        print("[Bridge] FATAL: Failed to unshare kernel namespaces.", flush=True)
         os._exit(1)
     
-    # 3. FORK THE SUPERVISOR (Grandchild)
-    # The Bridge must fork again so the new process is officially born as PID 1 
-    # inside the newly isolated PID namespace.
+    # Tell the Host Manager the namespace is built
+    os.write(ns_w, b"R")
+    os.close(ns_w)
 
-
+    # Block the Bridge until the Host Manager finishes throwing the cable through the wall
+    os.read(net_r, 1)
+    os.close(net_r)
+    
+    # 3. FORK THE SUPERVISOR
     supervisor_pid = os.fork()
     if supervisor_pid > 0:
         os.waitpid(supervisor_pid, 0)
         os._exit(0)
 
-    # --- ISOLATION BOUNDARY CROSSED ---
-    # Execution is now strictly within the context of Container PID 1.
-    
+    # --- PID 1 SUPERVISOR ---
+    # Configure the container side of the network BEFORE we chroot.
+
+
+    subprocess.run(["ip", "link", "set", "v-guest", "up"], check=True)
+    subprocess.run(["ip", "addr", "add", "10.0.0.2/24", "dev", "v-guest"], check=True)
+
     # 4. CONFIGURE MOUNT NAMESPACE
-    # Mark the root filesystem as private to prevent container mounts from leaking back to the host OS.
     subprocess.run(["mount", "--make-rprivate", "/"], check=True)
 
-    # Transition the process root into the provisioned Alpine filesystem.
     os.chdir(ROOTFS_DIR)
     os.chroot(".")
 
     # 5. INITIALIZE VIRTUAL FILESYSTEMS
-    # Mount procfs for process identity and namespace tracking.
     if not os.path.exists("/proc"):
         os.mkdir("/proc")
     subprocess.run(["mount", "-t", "proc", "proc", "/proc"], check=True)
 
-    # Mount sysfs for hardware and kernel object tracking.
     if not os.path.exists("/sys"):
         os.mkdir("/sys")
     subprocess.run(["mount", "-t", "sysfs", "sysfs", "/sys"], check=True)
 
-    # Mount the unified Cgroup v2 hierarchy for resource telemetry.
     cgroup_dir = "/sys/fs/cgroup"
     if not os.path.exists(cgroup_dir):
         os.makedirs(cgroup_dir, exist_ok=True)
     subprocess.run(["mount", "-t", "cgroup2", "cgroup2", cgroup_dir], check=True)
-        # 6. CREATE THE KERNEL PIPE BARRIER
-    # r = read end, w = write end
+
+    # 6. PAYLOAD SYNCHRONIZATION
     r, w = os.pipe()
 
-    # 7. FORK THE INTERACTIVE PAYLOAD
+    # 7. FORK THE PAYLOAD
     payload_pid = os.fork()
     
     if payload_pid > 0:
-        # SUPERVISOR (Parent)
-        os.close(r) # The parent only writes, so we close the read end
+        os.close(r) 
         
-        print("[PID 1 Supervisor] Runtime established. Spawning telemetry thread...", flush=True)
+        print("[PID 1 Supervisor] Runtime and Network established. Spawning telemetry...", flush=True)
         telemetryTask.start_blocking_watcher()
         
-        # Send 1 byte down the pipe to unblock the payload
         os.write(w, b"G")
         os.close(w)
         
         os.waitpid(payload_pid, 0)
         os._exit(0)
         
-    # PAYLOAD (Child)
-    os.close(w) # The child only reads, so we close the write end
-    
-    # This is a blocking system call. The CPU will consume 0 cycles here 
-    # until the parent writes the byte to the pipe.
+    os.close(w) 
     os.read(r, 1)
     os.close(r)
-    
-    print("[Container Payload] Initialization complete. Welcome to Vessel.", flush=True)
-    os.execvp("/bin/sh", ["/bin/sh", "-l"])
+
+    if mode == "sql":
+        print("[Container Payload] Provisioning database directories and credentials...", flush=True)
+        
+        if not os.path.exists("/run/mysqld"):
+            os.makedirs("/run/mysqld", mode=0o777, exist_ok=True)
+            
+        subprocess.run(["chown", "-R", "mysql:mysql", "/run/mysqld"], check=False)
+        subprocess.run(["chown", "-R", "mysql:mysql", "/data"], check=False)
+
+        # Dynamically generate the initialization SQL script
+        init_sql_path = "/tmp/init.sql"
+        with open(init_sql_path, "w") as f:
+            f.write("CREATE USER IF NOT EXISTS 'mysql'@'10.0.0.1' IDENTIFIED BY 'vesseladmin';\n")
+            f.write("GRANT ALL PRIVILEGES ON *.* TO 'mysql'@'10.0.0.1';\n")
+            f.write("FLUSH PRIVILEGES;\n")
+
+            
+        # Ensure the mysql user can read the temporary file
+        subprocess.run(["chown", "mysql:mysql", init_sql_path], check=False)
+
+        print("[Container Payload] Booting MariaDB Daemon directly as PID 1...", flush=True)
+        os.execvp("/usr/bin/mariadbd", [
+            "/usr/bin/mariadbd", 
+            "--datadir=/data", 
+            "--user=mysql", 
+            "--bind-address=0.0.0.0",
+            "--skip-networking=0",
+            "--port=3306",
+            "--skip-name-resolve",
+            f"--init-file={init_sql_path}"
+        ])
+    else:
+        print("[Container Payload] Initialization complete. Welcome to Vessel.", flush=True)
+        os.execvp("/bin/sh", ["/bin/sh", "-l"])
+
 
 
 if __name__ == "__main__":

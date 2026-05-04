@@ -70,6 +70,10 @@ def provision_rootfs():
         )
 
         subprocess.run(
+            ["chroot", ROOTFS_DIR, "apk", "add", "mariadb"],
+            check=True
+        )
+        subprocess.run(
             ["chroot", ROOTFS_DIR, "apk", "add", "mc"],
             check=True
         )
