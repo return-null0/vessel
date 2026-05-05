@@ -1,4 +1,4 @@
-# To enable networking
+# To enable full internet access in Shell mode
 
 ## On the host
 
