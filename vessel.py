@@ -129,11 +129,19 @@ def launch_vessel():
         if not os.path.exists("/run/mysqld"):
             os.makedirs("/run/mysqld", mode=0o777, exist_ok=True)
             
+        os.makedirs("/data", exist_ok=True)
+
         subprocess.run(["chown", "-R", "mysql:mysql", "/run/mysqld"], check=False)
         subprocess.run(["chown", "-R", "mysql:mysql", "/data"], check=False)
 
-        # Dynamically generate the initialization SQL script
-        init_sql_path = "/tmp/init.sql"
+        print("[Container Payload] Bootstrapping system tables...", flush=True)
+        subprocess.run([
+            "mariadb-install-db", 
+            "--user=mysql", 
+            "--datadir=/data"
+        ], check=True)
+
+        init_sql_path = "/run/mysqld/init.sql"
         with open(init_sql_path, "w") as f:
             f.write("CREATE USER IF NOT EXISTS 'mysql'@'10.0.0.1' IDENTIFIED BY 'vesseladmin';\n")
             f.write("GRANT ALL PRIVILEGES ON *.* TO 'mysql'@'10.0.0.1';\n")
