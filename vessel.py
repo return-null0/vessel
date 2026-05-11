@@ -48,6 +48,7 @@ def launch_vessel():
         subprocess.run(["ip", "link", "add", host_iface, "type", "veth", "peer", "name", guest_iface], check=True)
         subprocess.run(["ip", "link", "set", guest_iface, "netns", str(bridge_pid)], check=True)
         subprocess.run(["ip", "link", "set", host_iface, "up"], check=True)
+        subprocess.run(["ip", "link", "set", host_iface, "master", "vessel_br0"], check=True)
 
         # Unblock the Bridge so it can configure its side of the cable
         os.write(net_w, b"N")
