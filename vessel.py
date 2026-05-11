@@ -78,12 +78,11 @@ def launch_vessel():
     # Configure the container side of the network BEFORE we chroot.
 
 
-    subprocess.run(["/sbin/ip", "link", "set", "v-guest", "up"], check=True)
-    subprocess.run(["/sbin/ip", "addr", "add", "10.0.0.2/24", "dev", "v-guest"], check=True)
-
+    subprocess.run(["ip", "link", "set", "v-guest", "up"], check=True)
+    subprocess.run(["ip", "addr", "add", "10.0.0.2/24", "dev", "v-guest"], check=True)
 
     # 4. CONFIGURE MOUNT NAMESPACE
-    subprocess.run(["/bin/mount", "--make-rprivate", "/"], check=True)
+    subprocess.run(["mount", "--make-rprivate", "/"], check=True)
 
     os.chdir(ROOTFS_DIR)
     os.chroot(".")
@@ -91,16 +90,16 @@ def launch_vessel():
     # 5. INITIALIZE VIRTUAL FILESYSTEMS
     if not os.path.exists("/proc"):
         os.mkdir("/proc")
-    subprocess.run(["/bin/mount", "-t", "proc", "proc", "/proc"], check=True)
+    subprocess.run(["mount", "-t", "proc", "proc", "/proc"], check=True)
 
     if not os.path.exists("/sys"):
         os.mkdir("/sys")
-    subprocess.run(["/bin/mount", "-t", "sysfs", "sysfs", "/sys"], check=True)
+    subprocess.run(["mount", "-t", "sysfs", "sysfs", "/sys"], check=True)
 
     cgroup_dir = "/sys/fs/cgroup"
     if not os.path.exists(cgroup_dir):
         os.makedirs(cgroup_dir, exist_ok=True)
-    subprocess.run(["/bin/mount", "-t", "cgroup2", "cgroup2", cgroup_dir], check=True)
+    subprocess.run(["mount", "-t", "cgroup2", "cgroup2", cgroup_dir], check=True)
 
     # 6. PAYLOAD SYNCHRONIZATION
     r, w = os.pipe()
@@ -132,13 +131,12 @@ def launch_vessel():
             
         os.makedirs("/data", exist_ok=True)
 
-        subprocess.run(["/bin/chown", "-R", "mysql:mysql", "/run/mysqld"], check=False)
-        subprocess.run(["/bin/chown", "-R", "mysql:mysql", "/data"], check=False)
+        subprocess.run(["chown", "-R", "mysql:mysql", "/run/mysqld"], check=False)
+        subprocess.run(["chown", "-R", "mysql:mysql", "/data"], check=False)
 
         print("[Container Payload] Bootstrapping system tables...", flush=True)
-        # /usr/bin is standard for MariaDB utilities
         subprocess.run([
-            "/usr/bin/mariadb-install-db", 
+            "mariadb-install-db", 
             "--user=mysql", 
             "--datadir=/data"
         ], check=True)
@@ -151,7 +149,7 @@ def launch_vessel():
 
             
         # Ensure the mysql user can read the temporary file
-        subprocess.run(["/bin/chown", "mysql:mysql", init_sql_path], check=False)
+        subprocess.run(["chown", "mysql:mysql", init_sql_path], check=False)
 
         print("[Container Payload] Booting MariaDB Daemon directly as PID 1...", flush=True)
         os.execvp("/usr/bin/mariadbd", [
