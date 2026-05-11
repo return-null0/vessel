@@ -73,8 +73,11 @@ Executing this engine requires a **native Linux environment**. It cannot be exec
 3.	Launch the runtime engine in interactive shell mode by executing sudo ```./vessel-launcher.sh shell```. You can immediately execute ```ping 10.0.0.1``` to verify the automated host network bridge is active.
 4.	Verify your isolation by running ```ps x``` inside the spawned login shell to confirm your supervisor is operating as PID 1 and your shell as a child payload.
 5.	Exit the shell, and launch the engine in sharded database mode by executing sudo ```./vessel-launcher.sh sql shardCount```.
-6.	Open a new host terminal and connect to the isolated database payload over the virtual bridge by executing ```mysql -h 10.0.0.2 -u mysql -pvesseladmin```.
+6.	Open a new host terminal and connect to the isolated database payload over the virtual bridge by executing ```mysql -h 10.0.0.2 -u mysql -p vesseladmin```.
 7.	Test the asynchronous kernel IPC by locating the supervisor's host PID using ```ps -ef | grep vessel.py```, and executing ```sudo kill -10 [PID]```.
 8.	Return to your primary terminal to observe the real-time Cgroup v2 telemetry dump triggered by the host interrupt.
 
 ### [Optional Fun](vethernet.md)
+
+# TO DO : 
+Each db is connected to virtual bridge. you can test it with `mysql -h 10.0.0.x -u mysql -p ` Now implement the actual sharding functionality based on like an index of a table.
