@@ -18,7 +18,7 @@ alpine_arch = arch_map.get(current_arch, "x86_64")
 # Configure configuration parameters
 ALPINE_VERSION = "3.23"
 TARBALL_URL = f"https://dl-cdn.alpinelinux.org/alpine/v3.23/releases/{alpine_arch}/alpine-minirootfs-3.23.4-{alpine_arch}.tar.gz"
-ROOTFS_DIR = "/tmp/vessel-root"
+ROOTFS_DIR = "/tmp/vessel-root-base"
 TARBALL_PATH = "/tmp/alpine-rootfs.tar.gz"
 
 def provision_rootfs():

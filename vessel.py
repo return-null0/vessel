@@ -4,7 +4,7 @@ import subprocess
 import sys
 import telemetryTask
 
-ROOTFS_DIR = "/tmp/vessel-root"
+
 
 def launch_vessel():
     print("[Host Manager] Initializing Vessel runtime engine...", flush=True)
@@ -12,6 +12,13 @@ def launch_vessel():
     libc = ctypes.CDLL(None)
     
     mode = sys.argv[1]
+    shard_id = int(sys.argv[2])
+    ROOTFS_DIR = f"/tmp/vessel-root_{shard_id}"
+
+    # Calculate unique network coordinates
+    host_iface = f"v-host{shard_id}"
+    guest_iface = f"v-guest{shard_id}"
+    guest_ip = f"10.0.0.{shard_id + 1}/24" 
 
     CLONE_NEWNS  = 0x00020000  
     CLONE_NEWPID = 0x20000000  
@@ -38,10 +45,9 @@ def launch_vessel():
 
         print(f"[Host Manager] Namespace detected at PID {bridge_pid}. Injecting network...", flush=True)
         
-        subprocess.run(["ip", "link", "add", "v-host", "type", "veth", "peer", "name", "v-guest"], check=True)
-        subprocess.run(["ip", "link", "set", "v-guest", "netns", str(bridge_pid)], check=True)
-        subprocess.run(["ip", "addr", "add", "10.0.0.1/24", "dev", "v-host"], check=True)
-        subprocess.run(["ip", "link", "set", "v-host", "up"], check=True)
+        subprocess.run(["ip", "link", "add", host_iface, "type", "veth", "peer", "name", guest_iface], check=True)
+        subprocess.run(["ip", "link", "set", guest_iface, "netns", str(bridge_pid)], check=True)
+        subprocess.run(["ip", "link", "set", host_iface, "up"], check=True)
 
         # Unblock the Bridge so it can configure its side of the cable
         os.write(net_w, b"N")
@@ -78,8 +84,8 @@ def launch_vessel():
     # Configure the container side of the network BEFORE we chroot.
 
 
-    subprocess.run(["ip", "link", "set", "v-guest", "up"], check=True)
-    subprocess.run(["ip", "addr", "add", "10.0.0.2/24", "dev", "v-guest"], check=True)
+    subprocess.run(["/sbin/ip", "link", "set", guest_iface, "up"], check=True)
+    subprocess.run(["/sbin/ip", "addr", "add", guest_ip, "dev", guest_iface], check=True)
 
     # 4. CONFIGURE MOUNT NAMESPACE
     subprocess.run(["mount", "--make-rprivate", "/"], check=True)
@@ -137,7 +143,7 @@ def launch_vessel():
         print("[Container Payload] Bootstrapping system tables...", flush=True)
         subprocess.run([
             "mariadb-install-db", 
-            "--user=mysql", 
+            "--user=root", 
             "--datadir=/data"
         ], check=True)
 
@@ -155,7 +161,7 @@ def launch_vessel():
         os.execvp("/usr/bin/mariadbd", [
             "/usr/bin/mariadbd", 
             "--datadir=/data", 
-            "--user=mysql", 
+            "--user=root", 
             "--bind-address=0.0.0.0",
             "--skip-networking=0",
             "--port=3306",
