@@ -42,8 +42,8 @@ It is a common misconception that the Bridge and the Supervisor are the exact sa
 
 | Process Role | Execution Location | Responsibility|
 | -------- | -------- | -------- |
-| Host Manager| Debian Host | The root execution. Provisions the unified cgroup cage, assigns network cables to the virtual switch, and monitors the container from the outside.| 
-| Bridge | Debian Host | Spawned via the first os.fork(). Executes the unshare command to carve out the namespaces, but remains permanently stuck on the host side to prevent the kernel from garbage-collecting the newly forged environments.|
+| Host Manager| Host Machine | The root execution. Provisions the unified cgroup cage, assigns network cables to the virtual switch, and monitors the container from the outside.| 
+| Bridge | Host Machine | Spawned via the first os.fork(). Executes the unshare command to carve out the namespaces, but remains permanently stuck on the host side to prevent the kernel from garbage-collecting the newly forged environments.|
 | PID 1 Supervisor | Isolated Sandbox | Spawned via the second os.fork(). Birthed directly across the boundary into the isolated namespaces. It configures the internal IP, mounts the pseudo-filesystems (/proc), and runs the telemetry threads.|
 | The Payload | Isolated Sandbox | Spawned via the final os.fork() and replaced using os.execvp. The actual target application (MariaDB or an Alpine shell). Drops root privileges to run securely within the enforced constraints.|
 ## Core Architecture and Execution Flow
