@@ -57,15 +57,20 @@ This shell script serves as the resource manager and execution entry point. It i
 
 3. **Synchronized Network Injection & IPC Barrier**
 To prevent race conditions during namespace isolation, the Host Manager and the Bridge process utilize a two-way kernel pipe barrier. The Host Manager waits for the Bridge to unshare its network namespace. Once unshared, the Host Manager dynamically provisions a veth pair, injects the guest cable into the newly isolated namespace, and assigns the 10.0.0.1 switch gateway. The Host then signals the container via Inter-Process Communication to configure its own 10.0.0.2 IP address. This sequence ensures a fully operational network stack is guaranteed for the container before the payload ever boots.
+
 4. **Dynamic Process Brain Transplant**
 Vessel supports dynamic process replacement via the os.execvp system call. Because the network is pre-configured by the supervisor, the container can switch execution payloads based on your engineering goals.
 Shell Mode: By executing ```sudo ./vessel-launcher.sh shell```, Vessel drops you into an interactive Alpine terminal. This mode is your diagnostic laboratory. Use Shell Mode when you are first learning the engine or debugging new filesystem mounts. It allows you to manually verify the chroot boundaries, test the automated virtual bridge using tools like ping, and observe how the kernel maps your isolated environment from the inside out.
 SQL Mode: By executing ```sudo ./vessel-launcher.sh sql 1```, Vessel bypasses the interactive shell entirely to simulate a true cloud-native worker node. It programmatically provisions database socket directories, writes a dynamic SQL authorization script to the filesystem, and transplants its memory directly into the compiled mariadbd binary. The container boots silently in the background, fully wired to the host.
-5. **Asynchronous Telemetry & Kernel IPC (telemetryTask.py)**
-A native POSIX thread is spawned directly into the container's PID 1 memory space using ctypes and NPTL, operating independently of the Python Global Interpreter Lock. This watcher thread applies a kernel-level signal mask and enters a zero-CPU wait state using sigwait. Upon trapping a SIGUSR1 hardware interrupt from the host, it dynamically resolves its Cgroup v2 location via procfs and dumps real-time memory and CPU telemetry directly to the container's standard output.
+
+5. **Sharding Proxy (Consistent Hash Ring) (shard_proxy.py)**
+Operating strictly on the host system, the proxy script bridges the gap between external traffic and the isolated database containers. It utilizes a Consistent Hash Ring with virtual nodes to mathematically map incoming data records to specific MariaDB shards. The proxy dynamically scans the host's `/sys/class/net` directory to discover provisioned `v-host` interfaces, actively polls the containers until the databases are fully initialized, and exposes a unified HTTP API for seamless data ingestion and retrieval without manual database queries.
+
+6. **Asynchronous Telemetry & Node Health Dashboard**
+A native POSIX thread is spawned directly into the container's PID 1 memory space using ctypes and NPTL, operating independently of the Python Global Interpreter Lock. This watcher thread enters a zero-CPU wait state using sigwait. Upon trapping a SIGUSR1 hardware interrupt, it dumps real-time memory and CPU telemetry. The Node Health Dashboard aggregates this internal cgroup data alongside the proxy's routing state, providing a centralized, real-time visualization of cluster stability, hardware limits, and data distribution equilibrium.
 
 ### Prerequisites
-Executing this engine requires a **native Linux environment**. It cannot be executed natively on macOS or Windows due to its reliance on Linux-specific system calls. Absolute root privileges (sudo) are mandatory to interact with the kernel namespace and cgroup subsystems.
+Executing this engine requires a **native Linux environment**. It cannot be executed natively on macOS or Windows due to its reliance on Linux-specific system calls. Absolute root privileges (sudo) are mandatory to interact with the kernel namespace and cgroup subsystems. `Python3` and `pymysql` must be installed on the host operating system.
 
 # Quick Start
 1.	Clone this repository to your Linux host environment.
@@ -73,11 +78,6 @@ Executing this engine requires a **native Linux environment**. It cannot be exec
 3.	Launch the runtime engine in interactive shell mode by executing sudo ```./vessel-launcher.sh shell```. You can immediately execute ```ping 10.0.0.1``` to verify the automated host network bridge is active.
 4.	Verify your isolation by running ```ps x``` inside the spawned login shell to confirm your supervisor is operating as PID 1 and your shell as a child payload.
 5.	Exit the shell, and launch the engine in sharded database mode by executing sudo ```./vessel-launcher.sh sql shardCount```.
-6.	Open a new host terminal and connect to the isolated database payload over the virtual bridge by executing ```mysql -h 10.0.0.2 -u mysql -p vesseladmin```.
-7.	Test the asynchronous kernel IPC by locating the supervisor's host PID using ```ps -ef | grep vessel.py```, and executing ```sudo kill -10 [PID]```.
-8.	Return to your primary terminal to observe the real-time Cgroup v2 telemetry dump triggered by the host interrupt.
-
-### [Optional Fun](vethernet.md)
-
-# TO DO : 
-Each db is connected to virtual bridge. you can test it with `mysql -h 10.0.0.x -u mysql -p ` Now implement the actual sharding functionality based on like an index of a table.
+6. Wait for the Sharding Proxy to discover the `v-host` network interfaces, authenticate with MariaDB across the bridge, and bind to port 8080.
+7.	Open a new host terminal and interact with the HTTP Proxy to insert records by executing: `curl -X POST http://localhost:8080/insert -H "Content-Type: application/json" -d '{"id": "user_402", "payload": {"status": "active"}}'`
+8. Monitor the cluster by accessing the Node Health Dashboard. To test the asynchronous kernel IPC directly, you must locate the exact host PID of a container's Supervisor. You can find this by querying the Parent PID of the database payload: `ps -ef | grep mariadbd`. Take the Parent PID from that output and execute `sudo kill -10 [PPID]` to safely route the interrupt through the namespace and trigger a manual telemetry dump.
