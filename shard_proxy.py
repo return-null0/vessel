@@ -1,0 +1,297 @@
+import hashlib
+import json
+import time
+import os
+import socket
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import pymysql
+
+class ConsistentHashRing:
+    def __init__(self, replicas=100):
+        self.replicas = replicas
+        self.ring = {}
+        self.sorted_keys = []
+
+    def _hash(self, key):
+        return int(hashlib.sha256(key.encode('utf-8')).hexdigest(), 16)
+
+    def add_node(self, node_name):
+        for i in range(self.replicas):
+            virtual_node_key = f"{node_name}:replica:{i}"
+            hashed_key = self._hash(virtual_node_key)
+            self.ring[hashed_key] = node_name
+            self.sorted_keys.append(hashed_key)
+        self.sorted_keys.sort()
+
+    def remove_node(self, node_name):
+        self.ring = {k: v for k, v in self.ring.items() if v != node_name}
+        self.sorted_keys = sorted(self.ring.keys())
+
+    def get_node(self, string_key):
+        if not self.ring:
+            return None
+        
+        hashed_key = self._hash(string_key)
+        for node_hash in self.sorted_keys:
+            if hashed_key <= node_hash:
+                return self.ring[node_hash]
+        return self.ring[self.sorted_keys[0]]
+
+class VesselProxyRouter:
+    def __init__(self):
+        self.ring = ConsistentHashRing(replicas=50)
+        self.connections = {}
+        self.shard_ips = self._discover_shards()
+        self._connect_and_initialize()
+
+    def _discover_shards(self):
+        print("[Proxy] Scanning host network for Vessel shards...", flush=True)
+        discovered = []
+        time.sleep(2) 
+        interfaces = os.listdir('/sys/class/net')
+        for iface in interfaces:
+            if iface.startswith('v-host'):
+                shard_id = int(iface.replace('v-host', ''))
+                ip = f"10.0.0.{shard_id + 1}"
+                discovered.append((f"shard_{shard_id}", ip))
+        
+        print(f"[Proxy] Discovered {len(discovered)} active shards.", flush=True)
+        return discovered
+
+    def _wait_for_port(self, ip, port, timeout=30):
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            try:
+                with socket.create_connection((ip, port), timeout=1):
+                    return True
+            except OSError:
+                time.sleep(1)
+        return False
+
+    def _connect_and_initialize(self):
+        for name, ip in self.shard_ips:
+            print(f"[Proxy] Waiting for MariaDB to boot on {name} ({ip})...", flush=True)
+            if not self._wait_for_port(ip, 3306):
+                print(f"[Proxy] FATAL: Shard {name} failed to bind port 3306.", flush=True)
+                continue
+
+            connected = False
+            for attempt in range(10):
+                try:
+                    conn = pymysql.connect(
+                        host=ip,
+                        user='mysql',
+                        password='vesseladmin',
+                        autocommit=True,
+                        connect_timeout=2,
+                        read_timeout=2, 
+                        write_timeout=2 
+                    )
+                    self._setup_schema(conn)
+                    self.connections[name] = conn
+                    self.ring.add_node(name)
+                    print(f"[Proxy] Successfully integrated {name} into hash ring.", flush=True)
+                    connected = True
+                    break
+                except pymysql.MySQLError:
+                    time.sleep(2)
+            
+            if not connected:
+                print(f"[Proxy] FATAL: Could not authenticate with {name}.", flush=True)
+
+    def _setup_schema(self, conn):
+        with conn.cursor() as cursor:
+            cursor.execute("CREATE DATABASE IF NOT EXISTS vessel_data")
+            cursor.execute("USE vessel_data")
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS records (
+                    id VARCHAR(255) PRIMARY KEY,
+                    payload JSON
+                )
+            """)
+
+    def refresh_cluster_health(self):
+        status_report = {}
+        for name, ip in self.shard_ips:
+            shard_id = name.split('_')[1]
+            iface_path = f"/sys/class/net/v-host{shard_id}"
+            
+            if not os.path.exists(iface_path):
+                status_report[name] = {"status": "offline", "ip": ip, "error": "Namespace destroyed (veth severed)"}
+                if name in self.connections:
+                    del self.connections[name]
+                if name in self.ring.ring.values():
+                    self.ring.remove_node(name)
+                    print(f"[Proxy] CRITICAL: Namespace for {name} vaporized. Traffic re-routed.", flush=True)
+                continue 
+
+            try:
+                conn = self.connections.get(name)
+                if not conn:
+                    conn = pymysql.connect(
+                        host=ip, user='mysql', password='vesseladmin', 
+                        autocommit=True, connect_timeout=2
+                    )
+                    self.connections[name] = conn
+
+                with conn.cursor() as cursor:
+                    cursor.execute("USE vessel_data")
+                    cursor.execute("SELECT COUNT(*) FROM records")
+                    count = cursor.fetchone()[0]
+                    status_report[name] = {"status": "online", "ip": ip, "records": count}
+                
+                if name not in self.ring.ring.values():
+                    self.ring.add_node(name)
+                    print(f"[Proxy] Node {name} recovered and re-joined the routing ring.", flush=True)
+
+            except (pymysql.MySQLError, socket.error) as e:
+                status_report[name] = {"status": "offline", "ip": ip, "error": str(e)}
+                if name in self.connections:
+                    del self.connections[name]
+                if name in self.ring.ring.values():
+                    self.ring.remove_node(name)
+                    print(f"[Proxy] WARNING: MariaDB on {name} crashed. Traffic re-routed.", flush=True)
+
+        return status_report
+
+    def insert_record(self, record_id, payload):
+        target_shard = self.ring.get_node(record_id)
+        if not target_shard:
+            return None
+
+        conn = self.connections[target_shard]
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("USE vessel_data")
+                cursor.execute(
+                    "REPLACE INTO records (id, payload) VALUES (%s, %s)",
+                    (record_id, json.dumps(payload))
+                )
+            return target_shard
+        except pymysql.MySQLError:
+            self.refresh_cluster_health()
+            return "failed_retry_needed"
+
+    def get_record(self, record_id):
+        target_shard = self.ring.get_node(record_id)
+        if not target_shard:
+            return None, None
+
+        conn = self.connections.get(target_shard)
+        if not conn:
+            return target_shard, None
+
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("USE vessel_data")
+                cursor.execute("SELECT payload FROM records WHERE id = %s", (record_id,))
+                result = cursor.fetchone()
+                if result:
+                    return target_shard, json.loads(result[0])
+                return target_shard, None
+        except pymysql.MySQLError:
+            self.refresh_cluster_health()
+            return target_shard, None
+
+    def reconstruct_database(self):
+        unified_database = {}
+        for name, conn in self.connections.items():
+            try:
+                with conn.cursor() as cursor:
+                    cursor.execute("USE vessel_data")
+                    cursor.execute("SELECT id, payload FROM records")
+                    rows = cursor.fetchall()
+                    for row in rows:
+                        unified_database[row[0]] = {
+                            "shard": name,
+                            "payload": json.loads(row[1])
+                        }
+            except Exception as e:
+                print(f"[Proxy] Error reading from {name} during reconstruction: {e}", flush=True)
+        return unified_database
+
+# --- HTTP API Layer ---
+
+class ProxyHTTPHandler(BaseHTTPRequestHandler):
+    def _send_response(self, code, data):
+        try:
+            self.send_response(code)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps(data).encode('utf-8'))
+        except BrokenPipeError:
+            pass
+        except ConnectionResetError:
+            pass
+
+    def do_POST(self):
+        if self.path == '/insert':
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            body = json.loads(post_data)
+            
+            record_id = body.get('id')
+            payload = body.get('payload')
+            
+            target = router.insert_record(record_id, payload)
+            
+            if not target:
+                self._send_response(503, {"error": "Cluster offline. No active shards in ring."})
+            elif target == "failed_retry_needed":
+                self._send_response(502, {"error": "Target shard failed during write. Ring rebalanced, please retry."})
+            else:
+                self._send_response(200, {"status": "success", "routed_to": target})
+        else:
+            self._send_response(404, {"error": "Endpoint not found"})
+
+    def do_GET(self):
+        # Serve the external HTML file dynamically
+        if self.path == '/' or self.path == '/dashboard':
+            try:
+                with open('dashboard.html', 'r', encoding='utf-8') as f:
+                    html_content = f.read()
+                self.send_response(200)
+                self.send_header('Content-type', 'text/html')
+                self.end_headers()
+                self.wfile.write(html_content.encode('utf-8'))
+            except FileNotFoundError:
+                self.send_response(404)
+                self.send_header('Content-type', 'text/plain')
+                self.end_headers()
+                self.wfile.write(b"Error: dashboard.html not found in the current directory.")
+
+        elif self.path == '/api/status':
+            status_data = router.refresh_cluster_health()
+            self._send_response(200, status_data)
+
+        elif self.path == '/api/reconstruct':
+            merged_data = router.reconstruct_database()
+            self._send_response(200, {"status": "success", "data": merged_data})
+            
+        elif self.path.startswith('/retrieve/'):
+            record_id = self.path.split('/')[-1]
+            target, payload = router.get_record(record_id)
+            if not target:
+                self._send_response(503, {"error": "Cluster offline."})
+            elif payload:
+                self._send_response(200, {"status": "success", "routed_to": target, "data": payload})
+            else:
+                self._send_response(404, {"error": "Record not found", "routed_to": target})
+        else:
+            self._send_response(404, {"error": "Endpoint not found"})
+
+if __name__ == '__main__':
+    # Get the directory of the current script and change to it
+    # Ensures it finds dashboard.html
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    if script_dir:
+        os.chdir(script_dir)
+
+    router = VesselProxyRouter()
+    server_address = ('0.0.0.0', 8080)
+    httpd = HTTPServer(server_address, ProxyHTTPHandler)
+    print("\n[Proxy] Vessel Sharding Proxy active on port 8080.", flush=True)
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        print("[Proxy] Shutting down.")

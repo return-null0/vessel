@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Vessel Cluster Dashboard</title>
+    <style>
+        body { font-family: system-ui; background: #1e1e1e; color: #fff; padding: 20px; }
+        .card-container { display: flex; gap: 15px; flex-wrap: wrap; }
+        .card { background: #2d2d2d; padding: 15px; border-radius: 8px; min-width: 200px; }
+        button { background: #007acc; color: white; border: none; padding: 10px 15px; border-radius: 5px; cursor: pointer; font-size: 14px; margin-top: 15px; }
+        button:hover { background: #005999; }
+        
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 14px; background: #252525; }
+        th, td { border: 1px solid #444; padding: 12px; text-align: left; vertical-align: top; }
+        th { background: #333; position: sticky; top: 0; }
+        .shard-tag { background: #007acc; padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: bold; }
+        .error-tag { background: #f44336; }
+        pre { margin: 0; padding: 0; background: transparent; color: #d4d4d4; white-space: pre-wrap; word-wrap: break-word; }
+    </style>
+</head>
+<body>
+    <h1>Vessel Cluster Control</h1>
+    <div class="card-container" id="status-container">Loading cluster status...</div>
+    
+    <button onclick="reconstructDb()">Reconstruct Full Database</button>
+    <div id="reconstruction-output"></div>
+
+    <script>
+        async function fetchStatus() {
+            const response = await fetch('/api/status');
+            const data = await response.json();
+            let html = '';
+            for (const [shard, info] of Object.entries(data)) {
+                const isOnline = info.status === 'online';
+                const statusColor = isOnline ? '#4caf50' : '#f44336';
+                html += `<div class="card">
+                    <h3 style="margin-top: 0;">${shard}</h3>
+                    <p style="margin: 5px 0; color: #aaa;">IP: ${info.ip}</p>
+                    <p style="margin: 5px 0;">Status: <span style="color: ${statusColor}; font-weight: bold;">${info.status.toUpperCase()}</span></p>
+                    <p style="margin: 5px 0;">Records: <strong>${info.records || 0}</strong></p>
+                </div>`;
+            }
+            document.getElementById('status-container').innerHTML = html;
+        }
+
+        async function reconstructDb() {
+            const outputDiv = document.getElementById('reconstruction-output');
+            outputDiv.innerHTML = '<p>Initiating scatter-gather sequence across cluster...</p>';
+            
+            const response = await fetch('/api/reconstruct');
+            const result = await response.json();
+            const data = result.data;
+            
+            let html = `<h3>Unified Dataset (${Object.keys(data).length} total records)</h3>`;
+            html += `<table>
+                        <tr>
+                            <th style="width: 15%;">Record ID</th>
+                            <th style="width: 15%;">Origin Shard</th>
+                            <th style="width: 70%;">Decoded Payload</th>
+                        </tr>`;
+            
+            for (const [id, info] of Object.entries(data)) {
+                html += `<tr>
+                    <td><strong>${id}</strong></td>
+                    <td><span class="shard-tag">${info.shard}</span></td>
+                    <td><pre>${JSON.stringify(info.payload, null, 2)}</pre></td>
+                </tr>`;
+            }
+            html += `</table>`;
+            outputDiv.innerHTML = html;
+        }
+
+        fetchStatus();
+        setInterval(fetchStatus, 5000);
+    </script>
+</body>
+</html>

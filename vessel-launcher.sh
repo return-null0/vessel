@@ -13,7 +13,7 @@ if ! [[ ($# -eq 1 && "$1" == "shell") || ($# -eq 2 && "$1" == "sql" && "$2" -gt 
 fi
 
 CLUSTER_ROOT="/sys/fs/cgroup/vessel_cluster"
-
+sudo apt install python3-pymysql
 
 if ! ip link show vessel_br0 > /dev/null 2>&1; then
     echo "Provisioning global Layer 2 switch (vessel_br0)..."
@@ -36,7 +36,7 @@ echo "200000 100000" > "$CLUSTER_ROOT/cpu.max"
 # Put the Launcher/Manager into its own room 
 mkdir -p "$CLUSTER_ROOT/orchestrator"
 echo $$ > "$CLUSTER_ROOT/orchestrator/cgroup.procs"
-
+mkdir -p "/logs"
 
 echo "Building/Verifying the base OS Image..."
 python3 provisionLinux.py
@@ -44,6 +44,7 @@ python3 provisionLinux.py
 if [ "$1" == "shell" ]; then
     echo "Provisioning diagnostic Shell environment (Shard 1)..."
     
+    python3 shard_proxy.py > /l
     rm -rf "/tmp/vessel-root_1" 2>/dev/null
     cp -a "/tmp/vessel-root-base" "/tmp/vessel-root_1"
     
@@ -51,16 +52,21 @@ if [ "$1" == "shell" ]; then
 
 else
     # Signal Trap for Recursive Kill (with stderr silence)
-    trap 'exec 2>/dev/null; echo "Shutting down cluster..."; trap - SIGINT SIGTERM; find /sys/fs/cgroup/vessel_cluster/vessel_sandbox_* -name "cgroup.kill" -exec sh -c "echo 1 > {}" \;; wait; echo "Cluster completely offline."; exit 0' SIGINT SIGTERM
+    trap 'exec 2>/dev/null; echo "Shutting down cluster and proxy..."; kill $PROXY_PID 2>/dev/null; trap - SIGINT SIGTERM; find /sys/fs/cgroup/vessel_cluster/vessel_sandbox_* -name "cgroup.kill" -exec sh -c "echo 1 > {}" \;; wait; echo "Cluster completely offline."; exit 0' SIGINT SIGTERM
 
     echo "Rapidly cloning and booting the cluster..."
     for ((i=1; i<=$2; i++)); do
         echo "Cloning filesystem for Shard $i..."
         rm -rf "/tmp/vessel-root_$i" 2>/dev/null
         cp -a "/tmp/vessel-root-base" "/tmp/vessel-root_$i"
-        ./container-launcher.sh sql "$i" > "shard_${i}_boot.log" 2>&1 &
+        ./container-launcher.sh sql "$i" > "logs/shard_${i}_boot.log" 2>&1 &
     done
     
-    echo "Cluster is running. Press CTRL+C to initiate graceful teardown."
+    python3 shard_proxy.py > logs/proxy.log 2>&1 &
+    PROXY_PID=$!
+     
+    echo $PROXY_PID > "$CLUSTER_ROOT/orchestrator/cgroup.procs" 2>/dev/null
+    
+    echo "Cluster and Proxy are running. Press CTRL+C to initiate graceful teardown."
     wait
 fi
