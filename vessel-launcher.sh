@@ -51,6 +51,7 @@ if [ "$1" == "shell" ]; then
     exec ./container-launcher.sh shell 1
 
 else
+
     # Signal Trap for Recursive Kill (with stderr silence)
     trap 'exec 2>/dev/null; echo "Shutting down cluster and proxy..."; kill $PROXY_PID 2>/dev/null; trap - SIGINT SIGTERM; find /sys/fs/cgroup/vessel_cluster/vessel_sandbox_* -name "cgroup.kill" -exec sh -c "echo 1 > {}" \;; wait; echo "Cluster completely offline."; exit 0' SIGINT SIGTERM
 
@@ -62,7 +63,7 @@ else
         ./container-launcher.sh sql "$i" > "logs/shard_${i}_boot.log" 2>&1 &
     done
     
-    python3 shard_proxy.py > logs/proxy.log 2>&1 &
+    sudo python3 shard_proxy.py > logs/proxy.log 2>&1 &
     PROXY_PID=$!
      
     echo $PROXY_PID > "$CLUSTER_ROOT/orchestrator/cgroup.procs" 2>/dev/null

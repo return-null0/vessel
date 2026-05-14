@@ -1,5 +1,6 @@
 import ctypes
 import os
+import json
 
 libc = ctypes.CDLL("libc.so.6", use_errno=True)
 SIGSET_SIZE = 128 
@@ -59,7 +60,15 @@ def signal_watcher_callback(arg):
                     print(f"       Local Processes: {len(local_pids)} {local_pids}", flush=True)
                     print(f"       Ghost Processes: {ghost_count} (Invisible host scope)", flush=True)
 
-                    
+                    stats = {
+                    "memory_mb": round(mem_mb, 2),
+                    "cpu_sec": round(cpu_sec, 4),
+                    "total_threads": total_execution_contexts
+                }
+                # Write to the root of the container
+                with open("/telemetry.json", "w") as f:
+                    json.dump(stats, f)
+
             except FileNotFoundError as e:
                 print(f"  -> [Error] Telemetry file missing: {e}")
             except Exception as e:
@@ -72,6 +81,21 @@ CALLBACK_FUNC = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p)
 c_signal_callback = CALLBACK_FUNC(signal_watcher_callback)
 
 def start_blocking_watcher():
+    # cross namespace boundary to discover the true Host PID
+    host_pid = str(os.getpid())
+    try:
+        with open("/proc/self/status", "r") as f:
+            for line in f:
+                if line.startswith("NSpid:"):
+                    # Format is usually: NSpid:  [HostPID]   [ContainerPID]
+                    host_pid = line.strip().split()[1]
+                    break
+    except Exception:
+        pass
+
+    with open("/supervisor.pid", "w") as f:
+        f.write(host_pid)
+
     mask = (ctypes.c_char * SIGSET_SIZE)()
     libc.sigemptyset(ctypes.byref(mask))
     libc.sigaddset(ctypes.byref(mask), 10)
@@ -84,6 +108,3 @@ def start_blocking_watcher():
     res = libc.pthread_create(ctypes.byref(thread_id), None, c_signal_callback, None)
     if res == 0:
         libc.pthread_detach(thread_id)
-        print(f"[Vessel Init] Signal Watcher Thread {thread_id.value} detached.")
-    else:
-        print(f"[Vessel Init] Thread failed: {os.strerror(res)}")
