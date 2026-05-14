@@ -30,6 +30,15 @@ Inspecting the kernel's process tree reveals the exact anatomical structure of O
 **Key Detail:** You can visually trace the execution boundary. The Python Host Manager and Bridge process remain permanently anchored to the host, while the Supervisor safely crosses the void to become PID 1 inside the sandbox. The status flags further confirm that background telemetry threads are actively operating alongside the database daemon within the identical isolated memory space.
 </details>
 
+<details>
+<summary><b>View Photo 4: Real-Time Telemetry & Node Health Dashboard</b></summary>
+
+<img src="pics/pic4.png" width="800px">
+
+The Node Health Dashboard aggregates live hardware metrics from the isolated Cgroup v2 filesystems alongside the Sharding Proxy's active routing topology. This centralized interface provides immediate visibility into individual container memory consumption, CPU time slicing, and the data distribution equilibrium across the cluster.
+
+**Key Detail:** The telemetry gathering is completely decoupled from the database payload's execution thread. A native POSIX thread sits in a zero-CPU wait state inside the container's PID 1 namespace. When the host issues a targeted `SIGUSR1` interrupt, this thread instantly reads the kernel's cgroup API and outputs the metrics, ensuring real-time observability without introducing locking overhead or impacting database performance.
+</details>
 
 ## Overview
 Vessel bypasses high-level abstractions like Docker or containerd to interface directly with the Linux kernel. It constructs isolated environments using raw system calls, kernel namespaces, control groups, and an automated Layer 2 virtual switch. This project serves as a bare-metal implementation of a container runtime, proving that containers are simply a specific configuration of native Linux security features and routing tables rather than standalone virtual machines.
@@ -81,3 +90,7 @@ Executing this engine requires a **native Linux environment**. It cannot be exec
 6. Wait for the Sharding Proxy to discover the `v-host` network interfaces, authenticate with MariaDB across the bridge, and bind to port 8080.
 7.	Open a new host terminal and interact with the HTTP Proxy to insert records by executing: `curl -X POST http://localhost:8080/insert -H "Content-Type: application/json" -d '{"id": "user_402", "payload": {"status": "active"}}'`
 8. Monitor the cluster by accessing the Node Health Dashboard. To test the asynchronous kernel IPC directly, you must locate the exact host PID of a container's Supervisor. You can find this by querying the Parent PID of the database payload: `ps -ef | grep mariadbd`. Take the Parent PID from that output and execute `sudo kill -10 [PPID]` to safely route the interrupt through the namespace and trigger a manual telemetry dump.
+
+# TO DO 
+
+To integrate the low-level signal IPC hardware metrics, you must establish the container’s filesystem as the primary data bridge by modifying telemetryTask.py to write its current host PID to /run/supervisor.pid and serialize its ctypes gathered metrics into /run/telemetry.json upon trapping a SIGUSR1. On the control plane side, shard_proxy.py must be updated query each shard by reading those supervisor PIDs and issuing an os.kill(pid, 10) signal, followed by a brief asynchronous pause to ingest the resulting JSON telemetry. Finally, the dashboard.html needs a loop-logic adjustment to transition from a flat object to an array of shard objects, enabling the UI to dynamically render the new high-resolution RAM, CPU, and thread-count data without crashing on undefined keys.
