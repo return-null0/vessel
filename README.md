@@ -90,3 +90,9 @@ Executing this engine requires a **native Linux environment**. It cannot be exec
 6. Wait for the Sharding Proxy to discover the `v-host` network interfaces, authenticate with MariaDB across the bridge, and bind to port 8080.
 7.	Open a new host terminal and interact with the HTTP Proxy to insert records by executing: `curl -X POST http://localhost:8080/insert -H "Content-Type: application/json" -d '{"id": "user_402", "payload": {"status": "active"}}'`
 8. Access the interactive Node Health Dashboard by navigating to `http://localhost:8080` in your web browser. The proxy now acts as a central control plane, automatically interrogating the kernel's cgroup.procs to map true host PIDs and autonomously dispatching asynchronous hardware interrupts (SIGUSR1) across the namespace boundaries. The UI will render real-time, high-resolution telemetry for every shard, including active records, RAM utilization, CPU time, and thread count.
+
+
+# TO DO 
+
+When nodes go down, the engine should read the file system the node had 
+mounted and reincorporate the records into the live hash ring.
