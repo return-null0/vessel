@@ -96,8 +96,8 @@ Executing this engine requires a **native Linux environment**. It cannot be exec
 
 ## Important Note on Simulating Failures
 
-When testing the self-healing and crash-recovery capabilities of this cluster, please adhere to the following rules to ensure the architecture behaves as designed:
+When testing the crash-recovery capabilities of this cluster, please adhere to the following rules to ensure the architecture behaves as designed:
 
-- **Target the Payload, NOT the Supervisor:** Do not kill the main Vessel supervisor process (`vessel.py`). The supervisor acts as the container's PID 1 anchor; it maintains the virtual network bridge and executes the auto-relaunch loop. If you kill the supervisor, the entire isolated namespace collapses and the container cannot self-heal. You must exclusively target the database payload process (e.g., mariadbd).
+- **Target the Payload, NOT the Supervisor:** Do not kill the main Vessel supervisor process (`vessel.py`). The supervisor acts as the container's PID 1 anchor; it maintains the virtual network bridge and executes the auto-relaunch loop. If you kill the supervisor, the entire isolated namespace collapses and the container cannot recover. You must exclusively target the database payload process (mariadbd).
 
-- Use `SIGTERM` for Graceful Shutdowns: When simulating a standard node failure, send a termination signal (kill -15 <PID>) rather than a forced (`SIGKILL`) kill (kill -9 <PID>). Sending `SIGTERM` allows the payload to execute its graceful shutdown sequence before the supervisor catches the exit code and spins up a fresh instance.
+- Use `SIGTERM` for Graceful Shutdowns: When causing a standard node failure, send a termination signal (kill -15 <PID>) rather than a forced (`SIGKILL`) kill (kill -9 <PID>). Sending `SIGTERM` allows the payload to execute its graceful shutdown sequence before the supervisor catches the exit code and spins up a fresh instance.
