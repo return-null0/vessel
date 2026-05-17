@@ -81,21 +81,6 @@ CALLBACK_FUNC = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p)
 c_signal_callback = CALLBACK_FUNC(signal_watcher_callback)
 
 def start_blocking_watcher():
-    # cross namespace boundary to discover the true Host PID
-    host_pid = str(os.getpid())
-    try:
-        with open("/proc/self/status", "r") as f:
-            for line in f:
-                if line.startswith("NSpid:"):
-                    # Format is usually: NSpid:  [HostPID]   [ContainerPID]
-                    host_pid = line.strip().split()[1]
-                    break
-    except Exception:
-        pass
-
-    with open("/supervisor.pid", "w") as f:
-        f.write(host_pid)
-
     mask = (ctypes.c_char * SIGSET_SIZE)()
     libc.sigemptyset(ctypes.byref(mask))
     libc.sigaddset(ctypes.byref(mask), 10)

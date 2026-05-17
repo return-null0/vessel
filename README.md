@@ -78,6 +78,9 @@ Operating strictly on the host system, the proxy script bridges the gap between 
 6. **Asynchronous Telemetry & Node Health Dashboard**
 A native POSIX thread is spawned directly into the container's PID 1 memory space using ctypes and NPTL, operating independently of the Python Global Interpreter Lock. This watcher thread enters a zero-CPU wait state using sigwait. Upon trapping a SIGUSR1 hardware interrupt, it dumps real-time memory and CPU telemetry. The Node Health Dashboard aggregates this internal cgroup data alongside the proxy's routing state, providing a centralized, real-time visualization of cluster stability, hardware limits, and data distribution equilibrium.
 
+7. **Deterministic Resilience & Dynamic TCP Recovery**
+A respective container’s PID 1 supervisor acts as an anchor, maintaining the container environment and instantly relaunching crashed database payloads over surviving data. Simultaneously, the proxy  re-dials dropped TCP sockets before executing queries, making catastrophic backend failures completely invisible to the client.
+
 ### Prerequisites
 Executing this engine requires a **native Linux environment**. It cannot be executed natively on macOS or Windows due to its reliance on Linux-specific system calls. Absolute root privileges (sudo) are mandatory to interact with the kernel namespace and cgroup subsystems. `Python3` and `pymysql` must be installed on the host operating system.
 
@@ -90,9 +93,3 @@ Executing this engine requires a **native Linux environment**. It cannot be exec
 6. Wait for the Sharding Proxy to discover the `v-host` network interfaces, authenticate with MariaDB across the bridge, and bind to port 8080.
 7.	Open a new host terminal and interact with the HTTP Proxy to insert records by executing: `curl -X POST http://localhost:8080/insert -H "Content-Type: application/json" -d '{"id": "user_402", "payload": {"status": "active"}}'`
 8. Access the interactive Node Health Dashboard by navigating to `http://localhost:8080` in your web browser. The proxy now acts as a central control plane, automatically interrogating the kernel's cgroup.procs to map true host PIDs and autonomously dispatching asynchronous hardware interrupts (SIGUSR1) across the namespace boundaries. The UI will render real-time, high-resolution telemetry for every shard, including active records, RAM utilization, CPU time, and thread count.
-
-
-# TO DO 
-
-When nodes go down, the engine should read the file system the node had 
-mounted and reincorporate the records into the live hash ring.

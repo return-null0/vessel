@@ -117,8 +117,7 @@ class VesselProxyRouter:
             rootfs = f"/tmp/vessel-root_{shard_id}"
             telemetry_file = f"{rootfs}/telemetry.json"
             
-            # Ask the kernel for the exact Host PIDs assigned to this shard
-            cgroup_procs = f"/sys/fs/cgroup/vessel_cluster/vessel_sandbox_{shard_id}/cgroup.procs"
+            supervisor_pid_file = f"{rootfs}/supervisor.pid"
             
             node_stats = {
                 "name": name, 
@@ -132,6 +131,7 @@ class VesselProxyRouter:
             
             if name in self.connections:
                 try:
+                    self.connections[name].ping(reconnect=True)
                     with self.connections[name].cursor() as cursor:
                         cursor.execute("USE vessel_data")
                         cursor.execute("SELECT COUNT(*) FROM records")
@@ -141,15 +141,12 @@ class VesselProxyRouter:
                 except Exception:
                     node_stats["status"] = "db_error"
 
-            # Fire signal using the real Host PID straight from the cgroup
-            if os.path.exists(cgroup_procs):
+            if os.path.exists(supervisor_pid_file):
                 try:
-                    with open(cgroup_procs, "r") as f:
-                        pids = f.read().strip().split('\n')
-                        if pids and pids[0]:
-                            host_pid = int(pids[0])
-                            os.kill(host_pid, 10) 
-                            time.sleep(0.15) 
+                    with open(supervisor_pid_file, "r") as f:
+                        host_pid = int(f.read().strip())
+                        os.kill(host_pid, 10) 
+                        time.sleep(0.15) 
                 except Exception:
                     pass
                     
@@ -179,6 +176,7 @@ class VesselProxyRouter:
         conn = self.connections.get(target_shard)
         if not conn: return "failed_retry_needed"
         try:
+            conn.ping(reconnect=True)
             with conn.cursor() as cursor:
                 cursor.execute("USE vessel_data")
                 cursor.execute("REPLACE INTO records (id, payload) VALUES (%s, %s)", (record_id, json.dumps(payload)))
@@ -193,6 +191,7 @@ class VesselProxyRouter:
         conn = self.connections.get(target_shard)
         if not conn: return target_shard, None
         try:
+            conn.ping(reconnect=True)
             with conn.cursor() as cursor:
                 cursor.execute("USE vessel_data")
                 cursor.execute("SELECT payload FROM records WHERE id = %s", (record_id,))
@@ -207,6 +206,7 @@ class VesselProxyRouter:
         unified_database = {}
         for name, conn in self.connections.items():
             try:
+                conn.ping(reconnect=True)
                 with conn.cursor() as cursor:
                     cursor.execute("USE vessel_data")
                     cursor.execute("SELECT id, payload FROM records")

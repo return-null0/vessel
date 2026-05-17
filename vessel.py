@@ -3,7 +3,9 @@ import ctypes
 import subprocess
 import sys
 import telemetryTask
-
+import time
+import threading
+import signal
 
 
 def launch_vessel():
@@ -75,9 +77,14 @@ def launch_vessel():
     os.read(net_r, 1)
     os.close(net_r)
     
+
     # 3. FORK THE SUPERVISOR
     supervisor_pid = os.fork()
-    if supervisor_pid > 0:
+    if supervisor_pid > 0: 
+        # bridge knows the true Host PID. Write it directly to the proxy's target directory.
+        with open(f"{ROOTFS_DIR}/supervisor.pid", "w") as f:
+            f.write(str(supervisor_pid))
+            
         os.waitpid(supervisor_pid, 0)
         os._exit(0)
 
@@ -117,6 +124,7 @@ def launch_vessel():
     if payload_pid > 0:
         os.close(r) 
         
+        signal.pthread_sigmask(signal.SIG_BLOCK, [10])
         print("[PID 1 Supervisor] Runtime and Network established. Spawning telemetry...", flush=True)
         telemetryTask.start_blocking_watcher()
         
@@ -130,49 +138,48 @@ def launch_vessel():
     os.read(r, 1)
     os.close(r)
 
-    if mode == "sql":
-        print("[Container Payload] Provisioning database directories and credentials...", flush=True)
+    while True:
+        r, w = os.pipe()
+        payload_pid = os.fork()
         
-        if not os.path.exists("/run/mysqld"):
-            os.makedirs("/run/mysqld", mode=0o777, exist_ok=True)
+        if payload_pid > 0:
+            os.close(r) 
+            os.write(w, b"G")
+            os.close(w)
             
-        os.makedirs("/data", exist_ok=True)
-
-        subprocess.run(["chown", "-R", "mysql:mysql", "/run/mysqld"], check=False)
-        subprocess.run(["chown", "-R", "mysql:mysql", "/data"], check=False)
-
-        print("[Container Payload] Bootstrapping system tables...", flush=True)
-        subprocess.run([
-            "mariadb-install-db", 
-            "--user=root", 
-            "--datadir=/data"
-        ], check=True)
-
-        init_sql_path = "/run/mysqld/init.sql"
-        with open(init_sql_path, "w") as f:
-            f.write("CREATE USER IF NOT EXISTS 'mysql'@'10.0.0.1' IDENTIFIED BY 'vesseladmin';\n")
-            f.write("GRANT ALL PRIVILEGES ON *.* TO 'mysql'@'10.0.0.1';\n")
-            f.write("FLUSH PRIVILEGES;\n")
-
+            os.waitpid(payload_pid, 0)
+            print(f"\n[PID 1 Supervisor] Payload died. Restarting in 2s...", flush=True)
+            time.sleep(2)
+            continue
             
-        # Ensure the mysql user can read the temporary file
-        subprocess.run(["chown", "mysql:mysql", init_sql_path], check=False)
+        os.close(w) 
+        os.read(r, 1)
+        os.close(r)
 
-        print("[Container Payload] Booting MariaDB Daemon directly as PID 1...", flush=True)
-        os.execvp("/usr/bin/mariadbd", [
-            "/usr/bin/mariadbd", 
-            "--datadir=/data", 
-            "--user=root", 
-            "--bind-address=0.0.0.0",
-            "--skip-networking=0",
-            "--port=3306",
-            "--skip-name-resolve",
-            f"--init-file={init_sql_path}"
-        ])
-    else:
-        print("[Container Payload] Initialization complete. Welcome to Vessel.", flush=True)
-        os.execvp("/bin/sh", ["/bin/sh", "-l"])
+        if mode == "sql":
+            if not os.path.exists("/run/mysqld"):
+                os.makedirs("/run/mysqld", mode=0o777, exist_ok=True)
+            os.makedirs("/data", exist_ok=True)
+            subprocess.run(["chown", "-R", "mysql:mysql", "/run/mysqld"], check=False)
+            subprocess.run(["chown", "-R", "mysql:mysql", "/data"], check=False)
 
+            if not os.path.exists("/data/mysql"):
+                print("[Container Payload] Bootstrapping system tables...", flush=True)
+                subprocess.run(["mariadb-install-db", "--user=root", "--datadir=/data"], check=True)
+
+            init_sql_path = "/run/mysqld/init.sql"
+            with open(init_sql_path, "w") as f:
+                f.write("CREATE USER IF NOT EXISTS 'mysql'@'10.0.0.1' IDENTIFIED BY 'vesseladmin';\n")
+                f.write("GRANT ALL PRIVILEGES ON *.* TO 'mysql'@'10.0.0.1';\n")
+                f.write("FLUSH PRIVILEGES;\n")
+            subprocess.run(["chown", "mysql:mysql", init_sql_path], check=False)
+
+            os.execvp("/usr/bin/mariadbd", [
+                "/usr/bin/mariadbd", "--datadir=/data", "--user=root", "--bind-address=0.0.0.0",
+                "--skip-networking=0", "--port=3306", "--skip-name-resolve", f"--init-file={init_sql_path}"
+            ])
+        else:
+            os.execvp("/bin/sh", ["/bin/sh", "-l"])
 
 
 if __name__ == "__main__":
