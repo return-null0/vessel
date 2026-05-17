@@ -86,12 +86,12 @@ Executing this engine requires a **native Linux environment**. It cannot be exec
 
 # Quick Start
 1.	Clone this repository to your Linux host environment.
-2.	Execute sudo ```./vessel-launcher.sh shell``` to download the core filesystem, mirror the host DNS, compile external tools, and prepare the static container golden image at /tmp/vessel-root-base.
-3.	Launch the runtime engine in interactive shell mode by executing sudo ```./vessel-launcher.sh shell```. You can immediately execute ```ping 10.0.0.1``` to verify the automated host network bridge is active.
+2.	Execute ```sudo ./vessel-launcher.sh shell``` to download the core filesystem, mirror the host DNS, compile external tools, and prepare the static container golden image at /tmp/vessel-root-base.
+3.	Launch the runtime engine in interactive shell mode by executing  ```sudo./vessel-launcher.sh shell```. You can immediately execute ```ping 10.0.0.1``` to verify the automated host network bridge is active.
 4.	Verify your isolation by running ```ps x``` inside the spawned login shell to confirm your supervisor is operating as PID 1 and your shell as a child payload.
 5. Exit the shell, and launch the engine in sharded database mode by executing `sudo ./vessel-launcher.sh sql [shardCount]`. The script will cache your administrative credentials and autonomously spawn both the isolated MariaDB containers and the elevated background Sharding Proxy.
 6. Wait for the Sharding Proxy to discover the `v-host` network interfaces, authenticate with MariaDB across the bridge, and bind to port 8080.
-7.	Open a new host terminal and interact with the HTTP Proxy to insert records by executing: `curl -X POST http://localhost:8080/insert -H "Content-Type: application/json" -d '{"id": "user_402", "payload": {"status": "active"}}'`
+7.	Open a new host terminal and interact with the HTTP Proxy to insert records by executing: `python3 populate_cluster.py`
 8. Access the interactive Node Health Dashboard by navigating to `http://localhost:8080` in your web browser. The proxy now acts as a central control plane, automatically interrogating the kernel's cgroup.procs to map true host PIDs and autonomously dispatching asynchronous hardware interrupts (SIGUSR1) across the namespace boundaries. The UI will render real-time, high-resolution telemetry for every shard, including active records, RAM utilization, CPU time, and thread count.
 
 ## Important Note on Simulating Failures
