@@ -52,9 +52,9 @@ It is a common misconception that the Bridge and the Supervisor are the exact sa
 | Process Role | Execution Location | Responsibility|
 | -------- | -------- | -------- |
 | Host Manager| Host Machine | The root execution. Provisions the unified cgroup cage, assigns network cables to the virtual switch, and monitors the container from the outside.| 
-| Bridge | Host Machine | Spawned via the first os.fork(). Executes the unshare command to carve out the namespaces, but remains permanently stuck on the host side to prevent the kernel from garbage-collecting the newly forged environments.|
-| PID 1 Supervisor | Isolated Sandbox | Spawned via the second os.fork(). Birthed directly across the boundary into the isolated namespaces. It configures the internal IP, mounts the pseudo-filesystems (/proc), and runs the telemetry threads.|
-| The Payload | Isolated Sandbox | Spawned via the final os.fork() and replaced using os.execvp. The actual target application (MariaDB or an Alpine shell). Drops root privileges to run securely within the enforced constraints.|
+| Bridge | Host Machine | Spawned via the first `os.fork()`. Executes the unshare command to carve out the namespaces, but remains permanently stuck on the host side to prevent the kernel from garbage-collecting the newly forged environments.|
+| PID 1 Supervisor | Isolated Sandbox | Spawned via the second `os.fork()`. Birthed directly across the boundary into the isolated namespaces. It configures the internal IP, mounts the pseudo-filesystems (`/proc`), and runs the telemetry threads.|
+| The Payload | Isolated Sandbox | Spawned via the final `os.fork()` and replaced using `os.execvp()`. The actual target application (MariaDB or an Alpine shell). Drops root privileges to run securely within the enforced constraints.|
 ## Core Architecture and Execution Flow
 The engine relies on a physically separated architecture, utilizing distinct Linux kernel mechanisms spread across four primary components to establish an impenetrable container boundary with real-time telemetry and basic network access.
 
@@ -86,18 +86,18 @@ Executing this engine requires a **native Linux environment**. It cannot be exec
 
 # Quick Start
 1.	Clone this repository to your Linux host environment.
-2.	Execute ```sudo ./vessel-launcher.sh shell``` to download the core filesystem, mirror the host DNS, compile external tools, and prepare the static container golden image at /tmp/vessel-root-base.
+2.  Execute `sudo python3 provisionLinux.py` to grab core mini root filesystem, compile external tools, mirror the host DNS, and prepare the static container golden image at `/tmp/vessel-root-base`.
 3.	Launch the runtime engine in interactive shell mode by executing  ```sudo ./vessel-launcher.sh shell```. You can immediately execute ```ping 10.0.0.1``` to verify the automated host network bridge is active.
 4.	Verify your isolation by running ```ps x``` inside the spawned login shell to confirm your supervisor is operating as PID 1 and your shell as a child payload.
 5. Exit the shell, and launch the engine in sharded database mode by executing `sudo ./vessel-launcher.sh sql [shardCount]`. The script will cache your administrative credentials and autonomously spawn both the isolated MariaDB containers and the elevated background Sharding Proxy.
 6. Wait for the Sharding Proxy to discover the `v-host` network interfaces, authenticate with MariaDB across the bridge, and bind to port 8080.
 7.	Open a new host terminal and interact with the HTTP Proxy to insert records by executing: `python3 populate_cluster.py`
-8. Access the interactive Node Health Dashboard by navigating to `http://localhost:8080` in your web browser. The proxy now acts as a central control plane, automatically interrogating the kernel's cgroup.procs to map true host PIDs and autonomously dispatching asynchronous hardware interrupts (SIGUSR1) across the namespace boundaries. The UI will render real-time, high-resolution telemetry for every shard, including active records, RAM utilization, CPU time, and thread count.
+8. Access the interactive Node Health Dashboard by navigating to `http://localhost:8080` in your web browser. The proxy now acts as a central control plane, automatically interrogating the kernel's cgroup.procs to map true host PIDs and autonomously dispatching asynchronous hardware interrupts (SIGUSR1) across the namespace boundaries. The UI will render real-time telemetry for every shard, including active records, RAM utilization, CPU time, and thread count.
 
 ## Important Note on Simulating Failures
 
 When testing the crash-recovery capabilities of this cluster, please adhere to the following rules to ensure the architecture behaves as designed:
 
-- **Target the Payload, NOT the Supervisor:** Do not kill the main Vessel supervisor process (`vessel.py`). The supervisor acts as the container's PID 1 anchor; it maintains the virtual network bridge and executes the auto-relaunch loop. If you kill the supervisor, the entire isolated namespace collapses and the container cannot recover. You must exclusively target the database payload process (mariadbd).
+- **Target the Payload, NOT the Supervisor:** Do not kill the main Vessel supervisor process (`vessel.py`). The supervisor acts as the container's PID 1 anchor; it maintains the virtual network bridge and executes the auto-relaunch loop. If you kill the supervisor, the entire isolated namespace collapses and the container cannot recover. You must exclusively target the database payload process (mariadb).
 
 - Use `SIGTERM` for Graceful Shutdowns: When causing a standard node failure, send a termination signal (kill -15 <PID>) rather than a forced (`SIGKILL`) kill (kill -9 <PID>). Sending `SIGTERM` allows the payload to execute its graceful shutdown sequence before the supervisor catches the exit code and spins up a fresh instance.
