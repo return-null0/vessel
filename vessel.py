@@ -147,8 +147,13 @@ def launch_vessel():
             os.write(w, b"G")
             os.close(w)
             
-            os.waitpid(payload_pid, 0)
-            print(f"\n[PID 1 Supervisor] Payload died. Restarting in 2s...", flush=True)
+            _, status = os.waitpid(payload_pid, 0)
+
+            if mode != "sql":
+                print("\n[PID 1 Supervisor] Shell session ended. Shutting down container...", flush=True)
+                break
+                
+            print(f"\n[PID 1 Supervisor] Payload died (Status {status}). Restarting in 2s...", flush=True)
             time.sleep(2)
             continue
             
@@ -179,8 +184,8 @@ def launch_vessel():
                 "--skip-networking=0", "--port=3306", "--skip-name-resolve", f"--init-file={init_sql_path}"
             ])
         else:
+            print("[Container Payload] Initialization complete. Welcome to Vessel Shell.", flush=True)
             os.execvp("/bin/sh", ["/bin/sh", "-l"])
-
 
 if __name__ == "__main__":
     launch_vessel()

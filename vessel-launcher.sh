@@ -44,7 +44,6 @@ python3 provisionLinux.py
 if [ "$1" == "shell" ]; then
     echo "Provisioning diagnostic Shell environment (Shard 1)..."
     
-    python3 shard_proxy.py > /l
     rm -rf "/tmp/vessel-root_1" 2>/dev/null
     cp -a "/tmp/vessel-root-base" "/tmp/vessel-root_1"
     
