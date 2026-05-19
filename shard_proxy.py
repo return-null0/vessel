@@ -41,6 +41,7 @@ class VesselProxyRouter:
         self.ring = ConsistentHashRing(replicas=50)
         self.connections = {}
         self.shard_ips = self._discover_shards()
+        self.last_signal_time = 0.0
         self._connect_and_initialize()
 
     def _discover_shards(self):
@@ -78,8 +79,8 @@ class VesselProxyRouter:
                 try:
                     conn = pymysql.connect(
                         host=ip, user='mysql', password='vesseladmin',
-                        autocommit=True, connect_timeout=2,
-                        read_timeout=2, write_timeout=2 
+                        autocommit=True, connect_timeout=30,
+                        read_timeout=30, write_timeout=30
                     )
                     self._setup_schema(conn)
                     self.connections[name] = conn
@@ -111,7 +112,11 @@ class VesselProxyRouter:
             "total_memory_mb": 0.0,
             "shards": []
         }
-        
+        current_time = time.time()
+        send_signals = (current_time - self.last_signal_time) > 10.0
+        if send_signals:
+            self.last_signal_time = current_time
+
         for name, ip in self.shard_ips:
             shard_id = name.split('_')[1]
             rootfs = f"/tmp/vessel-root_{shard_id}"
@@ -141,7 +146,7 @@ class VesselProxyRouter:
                 except Exception:
                     node_stats["status"] = "db_error"
 
-            if os.path.exists(supervisor_pid_file):
+            if os.path.exists(supervisor_pid_file) and send_signals:
                 try:
                     with open(supervisor_pid_file, "r") as f:
                         host_pid = int(f.read().strip())
