@@ -81,6 +81,9 @@ A native POSIX thread is spawned directly into the container's PID 1 memory spac
 7. **Deterministic Resilience & Dynamic TCP Recovery**
 A respective container’s PID 1 supervisor acts as an anchor, maintaining the container environment and instantly relaunching crashed database payloads over surviving data. Simultaneously, the proxy  re-dials dropped TCP sockets before executing queries, making catastrophic backend failures completely invisible to the client.
 
+8. **Hardware Virtualization & PTY Bridging**
+To provide a flawless interactive shell without leaking state to the host machine, Vessel completely virtualizes the terminal hardware. The Host Manager allocates a Pseudo-Terminal teletypewriter (PTY) master multiplexer and places the host terminal into raw mode, creating an asynchronous I/O pump to shuttle keystrokes and window resize signals (`SIGWINCH`). Across the boundary, the container is shielded by an empty `tmpfs` `/dev` mount to hide physical host drives, populated only by an isolated `devpts` instance. The PID 1 Supervisor binds the resulting PTY slave as the controlling session terminal (`TIOCSCTTY`). This guarantees that job control (`Ctrl+C`), plain-text password masking, and full-screen applications function identically to bare metal while neutralizing security escape vectors like `TIOCSTI` injection
+
 ### Prerequisites
 Executing this engine requires a **native Linux environment**. It cannot be executed natively on macOS or Windows due to its reliance on Linux-specific system calls. Absolute root privileges (sudo) are mandatory to interact with the kernel namespace and cgroup subsystems. `Python3` and `pymysql` must be installed on the host operating system.
 
