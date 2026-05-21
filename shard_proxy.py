@@ -80,7 +80,7 @@ class VesselProxyRouter:
                     conn = pymysql.connect(
                         host=ip, user='mysql', password='vesseladmin',
                         autocommit=True, connect_timeout=30,
-                        read_timeout=30, write_timeout=30
+                        read_timeout=60, write_timeout=60
                     )
                     self._setup_schema(conn)
                     self.connections[name] = conn
@@ -113,7 +113,7 @@ class VesselProxyRouter:
             "shards": []
         }
         current_time = time.time()
-        send_signals = (current_time - self.last_signal_time) > 10.0
+        send_signals = (current_time - self.last_signal_time) > 30.0
         if send_signals:
             self.last_signal_time = current_time
 
