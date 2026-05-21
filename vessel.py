@@ -108,6 +108,7 @@ def launch_vessel():
                             break
             finally:
                 os.close(master_fd)
+                termios.tcsetattr(host_fd, termios.TCSADRAIN, original_tty_state)
         else:
             try:
                 os.waitpid(bridge_pid, 0)
@@ -217,7 +218,7 @@ def launch_vessel():
             _, status = os.waitpid(payload_pid, 0)
 
             if mode != "sql":
-                print("\n[PID 1 Supervisor] Shell session ended. Shutting down container...", flush=True)
+                print("\n[PID 1 Supervisor] Shell session ended. Shutting down container...", end="\r\n", flush=True)
                 break
 
             print(f"\n[PID 1 Supervisor] Payload died (Status {status}). Restarting in 2s...", flush=True)
@@ -270,7 +271,7 @@ def launch_vessel():
                 "--skip-networking=0", "--port=3306", "--skip-name-resolve", f"--init-file={init_sql_path}"
             ])
         else:
-            print("\n[Container Payload] Initialization complete. Welcome to Vessel Shell.", flush=True)
+            print("\r\n[Container Payload] Initialization complete. Welcome to Vessel Shell.", end="\r\n", flush=True)
             os.execvp("/bin/sh", ["/bin/sh", "-l"])
 
 if __name__ == "__main__":

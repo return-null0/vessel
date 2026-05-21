@@ -10,7 +10,7 @@ def signal_watcher_callback(arg):
     libc.sigemptyset(ctypes.byref(sig_set))
     libc.sigaddset(ctypes.byref(sig_set), 10) 
 
-    print("[Thread] Signal Watcher PARKED. Waiting for SIGUSR1 (10)...", flush=True)
+    print("\r[Thread] Signal Watcher PARKED. Waiting for SIGUSR1 (10)...", flush=True)
     
     sig_received = ctypes.c_int(0)
     while True:
