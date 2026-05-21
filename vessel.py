@@ -154,7 +154,16 @@ def launch_vessel():
         os.makedirs(dev_dir, exist_ok=True)
 
     subprocess.run(["mount", "-t", "tmpfs", "tmpfs", dev_dir], check=True)
+    S_IFCHR = 0x2000
     
+    null_node = f"{dev_dir}/null"
+    if not os.path.exists(null_node):
+        os.mknod(null_node, S_IFCHR | 0o666, os.makedev(1, 3))
+        
+    zero_node = f"{dev_dir}/zero"
+    if not os.path.exists(zero_node):
+        os.mknod(zero_node, S_IFCHR | 0o666, os.makedev(1, 5))
+        
     pts_dir = f"{dev_dir}/pts"
     os.makedirs(pts_dir, exist_ok=True)
     subprocess.run(["mount", "--bind", "/dev/pts", pts_dir], check=True)
