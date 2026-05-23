@@ -267,6 +267,20 @@ class ProxyHTTPHandler(BaseHTTPRequestHandler):
             if not target: self._send_response(503, {"error": "Cluster offline."})
             elif payload: self._send_response(200, {"status": "success", "routed_to": target, "data": payload})
             else: self._send_response(404, {"error": "Record not found", "routed_to": target})
+        elif self.path == '/pics/favicon.ico':
+            try:
+                with open('.' + self.path, 'rb') as file:
+                    content = file.read()
+                
+                self.send_response(200)
+                self.send_header('Content-Type', 'image/x-icon')
+                self.send_header('Content-Length', str(len(content)))
+                self.end_headers()
+                
+                self.wfile.write(content)
+            except FileNotFoundError:
+                self.send_error(404, "Favicon not found")
+                
         else:
             self._send_response(404, {"error": "Endpoint not found"})
 
