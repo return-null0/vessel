@@ -5,10 +5,10 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
-if ! [[ ($# -eq 1 && "$1" == "shell") || ($# -eq 2 && "$1" == "spring" && "$2" -gt 0) ]]; then
+if ! [[ ($# -eq 1 && "$1" == "shell") || ($# -eq 2 && "$1" == "sql" && "$2" -gt 0) ]]; then
     echo "Incorrect usage. Valid deployment targets:"
     echo "  sudo ./vessel-launcher.sh shell"
-    echo "  sudo ./vessel-launcher.sh spring [1-9]"
+    echo "  sudo ./vessel-launcher.sh sql [1-9]"
     exit 1
 fi
 

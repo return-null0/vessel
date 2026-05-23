@@ -1,22 +1,3 @@
-import os
-import ctypes
-import subprocess
-import sys
-import time
-import threading
-import signal
-import fcntl
-import termios
-import tty
-import select
-import errno
-import atexit
-
-try:
-    import telemetryTask
-except ImportError:
-    telemetryTask = None
-
 def launch_vessel():
     print("[Host Manager] Initializing Vessel runtime engine...", flush=True)
 
@@ -30,9 +11,8 @@ def launch_vessel():
     guest_iface = f"v-guest{shard_id}"
     guest_ip = f"10.0.0.{shard_id + 1}/24"
 
-    # Linux Namespace Constants
     CLONE_NEWNS  = 0x00020000
-    CLONE_NEWUTS = 0x04000000  # Isolates Hostname and Domain Name
+    CLONE_NEWUTS = 0x04000000
     CLONE_NEWPID = 0x20000000
     CLONE_NEWNET = 0x40000000
     flags = CLONE_NEWNS | CLONE_NEWUTS | CLONE_NEWPID | CLONE_NEWNET
@@ -50,7 +30,6 @@ def launch_vessel():
     if bridge_pid > 0:
         os.close(ns_w)
         os.close(net_r)
-
         if slave_fd is not None:
             os.close(slave_fd)
 
@@ -70,74 +49,38 @@ def launch_vessel():
         if mode == "shell":
             host_fd = sys.stdin.fileno()
             original_tty_state = termios.tcgetattr(host_fd)
-
             def cleanup_terminal():
                 termios.tcsetattr(host_fd, termios.TCSADRAIN, original_tty_state)
             atexit.register(cleanup_terminal)
-
-            def handle_sigterm(signum, frame):
-                sys.exit(0)
-            signal.signal(signal.SIGTERM, handle_sigterm)
-
-            def resize_pty(signum=None, frame=None):
-                try:
-                    import struct
-                    winsz = fcntl.ioctl(host_fd, termios.TIOCGWINSZ, struct.pack('HHHH', 0, 0, 0, 0))
-                    fcntl.ioctl(master_fd, termios.TIOCSWINSZ, winsz)
-                except OSError as e:
-                    if e.errno in (errno.EIO, errno.EBADF, errno.EINTR):
-                        pass
-                    else:
-                        raise
-            signal.signal(signal.SIGWINCH, resize_pty)
-            resize_pty()
-
-            try:
-                tty.setraw(host_fd)
-                while True:
-                    r_fds, w_fds, e_fds = select.select([host_fd, master_fd], [], [])
-
-                    if host_fd in r_fds:
-                        user_input = os.read(host_fd, 1024)
-                        if not user_input:
-                            break
-                        os.write(master_fd, user_input)
-
-                    if master_fd in r_fds:
-                        try:
-                            container_output = os.read(master_fd, 1024)
-                            if not container_output:
-                                break
-                            os.write(sys.stdout.fileno(), container_output)
-                            sys.stdout.flush()
-                        except OSError:
-                            break
-            finally:
-                os.close(master_fd)
-                termios.tcsetattr(host_fd, termios.TCSADRAIN, original_tty_state)
+            
+            tty.setraw(host_fd)
+            while True:
+                r_fds, _, _ = select.select([host_fd, master_fd], [], [])
+                if host_fd in r_fds:
+                    user_input = os.read(host_fd, 1024)
+                    if not user_input: break
+                    os.write(master_fd, user_input)
+                if master_fd in r_fds:
+                    try:
+                        container_output = os.read(master_fd, 1024)
+                        if not container_output: break
+                        os.write(sys.stdout.fileno(), container_output)
+                    except OSError: break
+            os.close(master_fd)
+            termios.tcsetattr(host_fd, termios.TCSADRAIN, original_tty_state)
         else:
-            try:
-                os.waitpid(bridge_pid, 0)
-            except OSError as e:
-                if e.errno != errno.ECHILD:
-                    raise
-
-        print("\n[Host Manager] Vessel execution concluded. Returning control to host.", flush=True)
+            os.waitpid(bridge_pid, 0)
         return
 
     os.close(ns_r)
     os.close(net_w)
-
     if master_fd is not None:
         os.close(master_fd)
 
-    # Unshare namespaces, now including UTS for hostname isolation
     if libc.unshare(flags) != 0:
-        print("[Bridge] FATAL: Failed to unshare kernel namespaces.", flush=True)
         os._exit(1)
 
     os.setsid()
-
     os.write(ns_w, b"R")
     os.close(ns_w)
 
@@ -146,163 +89,73 @@ def launch_vessel():
 
     supervisor_pid = os.fork()
     if supervisor_pid > 0:
-        with open(f"{ROOTFS_DIR}/supervisor.pid", "w") as f:
-            f.write(str(supervisor_pid))
-
         os.waitpid(supervisor_pid, 0)
         os._exit(0)
 
-    subprocess.run(["/sbin/ip", "link", "set", guest_iface, "up"], check=True)
-    subprocess.run(["/sbin/ip", "addr", "add", guest_ip, "dev", guest_iface], check=True)
+    time.sleep(0.5)
+    subprocess.run(["ip", "link", "set", "lo", "up"], check=True)
+    subprocess.run(["ip", "link", "set", guest_iface, "up"], check=True)
+    subprocess.run(["ip", "addr", "add", guest_ip, "dev", guest_iface], check=True)
 
     subprocess.run(["mount", "--make-rprivate", "/"], check=True)
-
     dev_dir = f"{ROOTFS_DIR}/dev"
-    if not os.path.exists(dev_dir):
-        os.makedirs(dev_dir, exist_ok=True)
-
+    os.makedirs(dev_dir, exist_ok=True)
     subprocess.run(["mount", "-t", "tmpfs", "tmpfs", dev_dir], check=True)
-    S_IFCHR = 0x2000
     
     null_node = f"{dev_dir}/null"
-    if not os.path.exists(null_node):
-        os.mknod(null_node, S_IFCHR | 0o666, os.makedev(1, 3))
-        
-    zero_node = f"{dev_dir}/zero"
-    if not os.path.exists(zero_node):
-        os.mknod(zero_node, S_IFCHR | 0o666, os.makedev(1, 5))
-        
-    pts_dir = f"{dev_dir}/pts"
-    os.makedirs(pts_dir, exist_ok=True)
-    subprocess.run(["mount", "--bind", "/dev/pts", pts_dir], check=True)
-
+    os.mknod(null_node, 0o20666, os.makedev(1, 3))
+    
     os.chdir(ROOTFS_DIR)
     os.chroot(".")
-
-    if not os.path.exists("/proc"):
-        os.mkdir("/proc")
+    
+    os.makedirs("/proc", exist_ok=True)
     subprocess.run(["mount", "-t", "proc", "proc", "/proc"], check=True)
-
-    if not os.path.exists("/sys"):
-        os.mkdir("/sys")
+    os.makedirs("/sys", exist_ok=True)
     subprocess.run(["mount", "-t", "sysfs", "sysfs", "/sys"], check=True)
 
-    print("[PID 1 Supervisor] Configuring container network identity...", flush=True)
-    
     container_hostname = f"vessel-{mode}-{shard_id}"
-    with open("/etc/hosts", "w") as f:
-        f.write("127.0.0.1 localhost\n")
-        f.write("::1 localhost\n")
-        f.write(f"127.0.0.1 {container_hostname}\n")
-        
     libc.sethostname(container_hostname.encode(), len(container_hostname))
 
-    cgroup_dir = "/sys/fs/cgroup"
-    if not os.path.exists(cgroup_dir):
-        os.makedirs(cgroup_dir, exist_ok=True)
-    subprocess.run(["mount", "-t", "cgroup2", "cgroup2", cgroup_dir], check=True)
-
     r, w = os.pipe()
-
     payload_pid = os.fork()
 
     if payload_pid > 0:
         os.close(r)
-
-        signal.pthread_sigmask(signal.SIG_BLOCK, [10])
-        print("\n[PID 1 Supervisor] Runtime and Network established. Spawning telemetry...", flush=True)
-        if telemetryTask:
-            telemetryTask.start_blocking_watcher()
-
         os.write(w, b"G")
         os.close(w)
-
         os.waitpid(payload_pid, 0)
         os._exit(0)
 
     os.close(w)
     os.read(r, 1)
     os.close(r)
+    os.setsid()
 
-    while True:
-        r, w = os.pipe()
-        payload_pid = os.fork()
+    null_fd = os.open("/dev/null", os.O_RDWR)
+    os.dup2(null_fd, 0)
+    if null_fd > 2: os.close(null_fd)
 
-        if payload_pid > 0:
-            os.close(r)
-            os.write(w, b"G")
-            os.close(w)
-
-            _, status = os.waitpid(payload_pid, 0)
-
-            if mode == "shell":
-                print("\n[PID 1 Supervisor] Shell session ended. Shutting down container...", end="\r\n", flush=True)
-                break
-
-            print(f"\n[PID 1 Supervisor] Payload died (Status {status}). Restarting in 2s...", flush=True)
-            time.sleep(2)
-            continue
-
-        os.close(w)
-        os.read(r, 1)
-        os.close(r)
-
-        os.setsid()
-
-        if mode == "shell" and slave_fd is not None:
-            fcntl.ioctl(slave_fd, termios.TIOCSCTTY, 0)
-            os.dup2(slave_fd, 0)
-            os.dup2(slave_fd, 1)
-            os.dup2(slave_fd, 2)
-            if slave_fd > 2:
-                os.close(slave_fd)
-        else:
-            # Keep standard input mapped to null to prevent blocking
-            null_fd = os.open("/dev/null", os.O_RDWR)
-            os.dup2(null_fd, 0)
-            
-            # DO NOT map 1 and 2 to null. Leave them alone so the Java stack trace 
-            # naturally flows out to the log files generated by the launcher script.
-            
-            if null_fd > 2:
-                os.close(null_fd)
-            if slave_fd is not None:
-                os.close(slave_fd)
-
-        if mode == "sql":
-            if not os.path.exists("/run/mysqld"):
-                os.makedirs("/run/mysqld", mode=0o777, exist_ok=True)
+    if mode == "sql":
             os.makedirs("/data", exist_ok=True)
-            subprocess.run(["chown", "-R", "mysql:mysql", "/run/mysqld"], check=False)
-            subprocess.run(["chown", "-R", "mysql:mysql", "/data"], check=False)
+            # Ensure the bootstrap can write to the data dir
+            subprocess.run(["chmod", "777", "/data"], check=True)
 
             if not os.path.exists("/data/mysql"):
                 print("[Container Payload] Bootstrapping system tables...", flush=True)
-                subprocess.run(["mariadb-install-db", "--user=root", "--datadir=/data"], check=True)
-
-            init_sql_path = "/run/mysqld/init.sql"
-            with open(init_sql_path, "w") as f:
-                f.write("CREATE USER IF NOT EXISTS 'mysql'@'10.0.0.100' IDENTIFIED BY 'vesseladmin';\n")
-                f.write("GRANT ALL PRIVILEGES ON *.* TO 'mysql'@'10.0.0.100';\n")
-                f.write("FLUSH PRIVILEGES;\n")
-            subprocess.run(["chown", "mysql:mysql", init_sql_path], check=False)
+                # Capture the output to identify if it is failing silently
+                result = subprocess.run(["mariadb-install-db", "--user=root", "--datadir=/data"], 
+                                        capture_output=True, text=True)
+                if result.returncode != 0:
+                    print(f"BOOTSTRAP FAILED: {result.stderr}")
+                    os._exit(1)
 
             os.execvp("/usr/bin/mariadbd", [
-                "/usr/bin/mariadbd", "--datadir=/data", "--user=root", "--bind-address=0.0.0.0",
-                "--skip-networking=0", "--port=3306", "--skip-name-resolve", f"--init-file={init_sql_path}"
+                "/usr/bin/mariadbd", 
+                "--datadir=/data", 
+                "--user=root", 
+                "--port=3306",
+                "--skip-networking=0",
+                "--bind-address=0.0.0.0"
             ])
-            
-        elif mode == "spring":
-            print("\r\n[Container Payload] Booting Spring Boot Router on JVM...", end="\r\n", flush=True)
-            os.execvp("/usr/bin/java", [
-                "/usr/bin/java",
-                "-jar",
-                "/app/vessel-engine.jar"
-            ])
-            
-        else:
-            print("\r\n[Container Payload] Initialization complete. Welcome to Vessel Shell.", end="\r\n", flush=True)
-            os.execvp("/bin/sh", ["/bin/sh", "-l"])
-
-if __name__ == "__main__":
-    launch_vessel()
+    else:
+        os.execvp("/bin/sh", ["/bin/sh", "-l"])
