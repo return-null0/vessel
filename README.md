@@ -106,34 +106,7 @@ to prevent conflict with the `DashboardController`.
 
 **Dashboard Stale Data** : The dashboard utilizes a cache-busting timestamp (`?t=Date.now()`) in the fetch API. If you see stale status (Red/Orange), check the `DashboardController` logs for `JdbcTemplate` initialization failures.
 
-<style>
-    .vessel-docs details {
-        background: #0f172a;
-        margin-bottom: 1rem;
-        padding: 1.25rem;
-        border-radius: 0.5rem;
-        border: 1px solid #334155;
-    }
-    .vessel-docs summary {
-        cursor: pointer;
-        font-weight: 600;
-        color:rgb(255, 255, 255);
-        padding: 0.5rem;
-        font-size: 1.1rem;
-    }
-    .vessel-docs img {
-        margin: 1rem 0;
-        border-radius: 0.25rem;
-        border: 1px solid #1e293b;
-        max-width: 100%;
-        display: block;
-    }
-    .vessel-docs p {
-        line-height: 1.6;
-        margin: 0.5rem 0;
-        color:rgb(255, 255, 255);
-    }
-</style>
+
 <hr style="border: 0; border-top: 1px solid #334155; margin: 2rem 0;">
 
 <p style="line-height: 1.6; color: #cbd5e1;">
