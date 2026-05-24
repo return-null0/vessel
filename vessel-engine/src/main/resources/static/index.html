@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Vessel Architecture Control</title>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; background: #020617; color: #f8fafc; padding: 2rem; margin: 0; }
+        .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; padding-bottom: 1rem; margin-bottom: 2rem; }
+        .btn { background: #10b981; color: white; border: none; padding: 0.75rem 1.5rem; font-weight: bold; border-radius: 0.5rem; cursor: pointer; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); gap: 2rem; }
+        .shard-card { background: #0f172a; padding: 1.5rem; border-radius: 0.75rem; border: 2px solid #1e293b; }
+        .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+        .action-group { display: flex; gap: 0.75rem; }
+        .btn-action { border: none; padding: 0.6rem 1.2rem; font-size: 0.8rem; font-weight: bold; border-radius: 0.4rem; cursor: pointer; color: white; }
+        .telemetry-box { background: #1e293b; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem; color: #a7f3d0; border-left: 4px solid #10b981; }
+        
+        .dead-node { border-color: #ef4444 !important; opacity: 0.6; animation: none !important; }
+        @keyframes pulse { 0% { border-color: #1e293b; } 50% { border-color: #f59e0b; } 100% { border-color: #1e293b; } }
+        .restarting { animation: pulse 1.5s infinite ease-in-out; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Vessel Container Array</h1>
+        <div style="display: flex; gap: 10px;">
+            <button class="btn" onclick="triggerUnshard()">Build Unsharded Database</button>
+            <button class="btn" id="back-btn" style="display:none; background:#334155" onclick="showCluster()">Back</button>
+        </div>
+    </div>
+    <div id="sharded-view" class="grid"></div>
+    <table id="unsharded-view" style="width: 100%; display: none; background:#0f172a">
+        <thead><tr><th>Timestamp</th><th>ID</th><th>Payload</th><th>Origin</th></tr></thead>
+        <tbody id="unsharded-body"></tbody>
+    </table>
+    <script>
+        function showCluster() {
+            document.getElementById('sharded-view').style.display = 'grid';
+            document.getElementById('unsharded-view').style.display = 'none';
+            document.getElementById('back-btn').style.display = 'none';
+            loadCluster();
+        }
+
+        async function loadCluster() {
+            try {
+                const data = await (await fetch('/api/cluster-state')).json();
+                const grid = document.getElementById('sharded-view');
+                grid.innerHTML = '';
+                data.forEach(shard => {
+                    const card = document.createElement('div');
+                    // Logic: If status is DOWN, dead-node class overrides everything else
+                    card.className = `shard-card ${shard.status === 'DOWN' ? 'dead-node' : ''} ${shard.status === 'BOOTING' ? 'restarting' : ''}`;
+                    card.innerHTML = `
+                        <div class="card-header"><strong>IP: ${shard.ip_address}</strong>
+                            ${shard.status !== 'DOWN' ? `<div class="action-group">
+                                <button class="btn-action" style="background:#f59e0b" onclick="killShard('${shard.ip_address}', 'restart')">RESTART</button>
+                                <button class="btn-action" style="background:#ef4444" onclick="killShard('${shard.ip_address}', 'kill')">KILL</button>
+                            </div>` : ''}
+                        </div>
+                        <div class="telemetry-box">RAM: ${shard.telemetry.memory_mb || 0} MB | CPU: ${shard.telemetry.cpu_sec || 0} s</div>
+                        <div class="record-scroll" style="height:200px; overflow-y:auto">
+                            ${shard.records ? shard.records.map(r => `<div style="background:#1e293b; padding:0.5rem; margin-top:5px; border-radius:4px;">${r.payload}</div>`).join('') : 'Awaiting sync...'}
+                        </div>
+                    `;
+                    grid.appendChild(card);
+                });
+            } catch (e) { setTimeout(loadCluster, 2000); }
+        }
+
+        function triggerUnshard() {
+            document.getElementById('sharded-view').style.display = 'none';
+            document.getElementById('unsharded-view').style.display = 'table';
+            document.getElementById('back-btn').style.display = 'inline-block';
+            fetch('/api/unshard').then(res => res.json()).then(data => {
+                document.getElementById('unsharded-body').innerHTML = data.map(r => `<tr><td>${r.created_at}</td><td>${r.id}</td><td>${r.payload}</td><td>${r.source_node}</td></tr>`).join('');
+            });
+        }
+
+        function killShard(ip, action) {
+            fetch('/api/' + action + '?targetIp=' + ip, { method: 'POST' }).then(loadCluster);
+        }
+
+        loadCluster();
+    </script>
+</body>
+</html>
