@@ -15,6 +15,7 @@ import threading
 import http.server
 import socketserver
 import datetime
+import shutil
 
 libc = ctypes.CDLL("libc.so.6", use_errno=True)
 SIGSET_SIZE = 128 
@@ -82,7 +83,6 @@ def start_blocking_watcher():
     if res == 0:
         libc.pthread_detach(thread_id)
 
-# Add this global at the top of launch_vessel or as a global
 active_payload_pid = [0] 
 
 def launch_telemetry_trigger():
@@ -103,7 +103,6 @@ def launch_telemetry_trigger():
 
         def do_POST(self):
             if self.path == '/kill':
-                # Intentional shutdown: Stop restarting the child
                 RESTART_ALLOWED[0] = False
                 if ACTIVE_PID[0] > 0:
                     os.kill(ACTIVE_PID[0], signal.SIGKILL)
@@ -112,7 +111,6 @@ def launch_telemetry_trigger():
                 self.end_headers()
                 
             elif self.path == '/restart':
-                # Graceful restart: Allow the supervisor to loop again
                 RESTART_ALLOWED[0] = True
                 if ACTIVE_PID[0] > 0:
                     os.kill(ACTIVE_PID[0], signal.SIGTERM)
@@ -242,7 +240,6 @@ def launch_vessel():
     start_blocking_watcher()
     threading.Thread(target=launch_telemetry_trigger, daemon=True).start()
 
-    # Ensure this is defined outside the loop in launch_vessel
     active_payload_pid = [0] 
 
     while True:
@@ -250,7 +247,6 @@ def launch_vessel():
         pid = os.fork()
         
         if pid > 0:
-            # SUPERVISOR LOGIC
             os.close(r)
             os.write(w, b"G")
             os.close(w)
@@ -258,7 +254,6 @@ def launch_vessel():
             ACTIVE_PID[0] = pid
             _, status = os.waitpid(pid, 0)
             
-            # Watchdog Logic: Did the child die because we killed it, or did it crash?
             if RESTART_ALLOWED[0]:
                 print(f"[Watchdog] Child {pid} exited unexpectedly. Restarting in 2s...", flush=True)
                 time.sleep(2)
@@ -267,7 +262,6 @@ def launch_vessel():
                 print(f"[Watchdog] Shutdown requested. Cleaning up Supervisor.", flush=True)
                 os._exit(0)
 
-        # CHILD PROCESS LOGIC
         os.close(w)
         os.read(r, 1)
         os.close(r)
@@ -284,7 +278,6 @@ def launch_vessel():
             subprocess.run(["chmod", "777", db_dir], check=False)
             init_sql_path = "/tmp/init.sql"
             
-            # Optimization: Only run install-db if the mysql system tables don't exist
             if not os.path.exists(os.path.join(db_dir, "mysql")):
                 subprocess.run(["mariadb-install-db", "--user=root", f"--datadir={db_dir}"], check=True)
                 
@@ -303,7 +296,6 @@ def launch_vessel():
                     event_time = (now - datetime.timedelta(minutes=30-j)).strftime("%Y-%m-%d %H:%M:%S")
                     event_text = events[j % len(events)]
                     record_id = f"V-SHARD{shard_id}-R{j:04d}"
-                    # Use INSERT IGNORE to prevent crashes on restart due to Primary Key collision
                     f.write(f"INSERT IGNORE INTO cluster_data (id, payload, origin_shard, created_at) VALUES ('{record_id}', '{event_text}', {shard_id}, '{event_time}');\n")
                 
                 f.write("FLUSH PRIVILEGES;\n")
@@ -317,15 +309,19 @@ def launch_vessel():
             ])
         
         elif mode == "spring":
-            java_bin = "/usr/lib/jvm/java-21-openjdk/bin/java" 
+            java_bin = shutil.which("java")
+            if not java_bin:
+                java_bin = "/usr/bin/java"
+            
+            java_home = os.path.dirname(os.path.dirname(java_bin))
+            
             env = {
-                "PATH": "/usr/lib/jvm/java-21-openjdk/bin:/usr/bin:/bin",
-                "LD_LIBRARY_PATH": "/usr/lib/jvm/java-21-openjdk/lib/server:/usr/lib",
-                "JAVA_HOME": "/usr/lib/jvm/java-21-openjdk",
-                "VESSEL_SHARD_COUNT": total_shards
+                "PATH": f"{os.path.dirname(java_bin)}:/usr/bin:/bin",
+                "LD_LIBRARY_PATH": f"{java_home}/lib/server:/usr/lib",
+                "JAVA_HOME": java_home,
+                "VESSEL_SHARD_COUNT": str(total_shards)
             }
             os.execvpe(java_bin, [java_bin, "-Dserver.address=0.0.0.0", "-jar", "/app/vessel-engine.jar"], env)
-
         else:
             os.execvp("/bin/sh", ["/bin/sh", "-l"])
 

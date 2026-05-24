@@ -43,7 +43,6 @@ public class DashboardController {
     private JdbcTemplate createTemplate(String ip) {
         DriverManagerDataSource ds = new DriverManagerDataSource();
         ds.setDriverClassName("org.mariadb.jdbc.Driver");
-        // Reduced timeout to 1 second to make the dashboard responsive
         ds.setUrl("jdbc:mariadb://" + ip + ":3306/?connectTimeout=1000");
         ds.setUsername("mysql");
         ds.setPassword("vesseladmin");
@@ -60,15 +59,23 @@ public class DashboardController {
             
             try {
                 shardData.put("telemetry", restTemplate.getForObject("http://" + targetIp + ":9090/telemetry", Map.class));
+                
                 JdbcTemplate jdbc = jdbcTemplates.computeIfAbsent(targetIp, this::createTemplate);
                 jdbc.execute("CREATE DATABASE IF NOT EXISTS appdata");
                 shardData.put("records", jdbc.queryForList("SELECT * FROM appdata.cluster_data ORDER BY created_at DESC LIMIT 15"));
                 shardData.put("status", "UP");
+                
             } catch (Exception e) {
-                jdbcTemplates.remove(targetIp);
-                shardData.put("telemetry", Map.of("error", "Offline"));
+                try {
+                    restTemplate.getForObject("http://" + targetIp + ":9090/telemetry", Map.class);
+                    shardData.put("status", "BOOTING");
+                    shardData.put("telemetry", Map.of("error", "Database Syncing"));
+                } catch (Exception telemetryError) {
+                    shardData.put("status", "DOWN");
+                    shardData.put("telemetry", Map.of("error", "Watcher Offline"));
+                    jdbcTemplates.remove(targetIp);
+                }
                 shardData.put("records", null);
-                shardData.put("status", "DOWN"); 
             }
             results.add(shardData);
         }

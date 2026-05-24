@@ -82,8 +82,7 @@ else
     SPRING_NODE_ID=99
     rm -rf "/tmp/vessel-root_$SPRING_NODE_ID" 2>/dev/null
     cp -a "/tmp/vessel-root-base" "/tmp/vessel-root_$SPRING_NODE_ID"
-    
-    # Pass the total shard count ($2) as the third argument to the container launcher
+
     ./container-launcher.sh spring "$SPRING_NODE_ID" "$2" > "logs/spring_router_boot.log" 2>&1 &
     
     echo "Cluster is running. Spring Boot Router is booting on 10.0.0.100."
