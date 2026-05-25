@@ -12,6 +12,14 @@ if ! [[ ($# -eq 1 && "$1" == "shell") || ($# -eq 2 && "$1" == "sql" && "$2" -gt 
     exit 1
 fi
 
+cleanup_rootfs() {
+    local dir=$1
+    if [ -d "$dir" ]; then
+        grep "$dir" /proc/mounts | awk '{print $2}' | sort -r | xargs -r sudo umount -l 2>/dev/null
+        sudo rm -rf "$dir"
+    fi
+}
+
 echo "Validating project environment and permissions..."
 chown -R "${SUDO_USER:-$USER}:${SUDO_USER:-$USER}" vessel-engine
 echo "Compiling the Spring Boot sharding payload..."
@@ -51,9 +59,6 @@ echo "Establishing unified cluster cgroup..."
 mkdir -p "$CLUSTER_ROOT"
 echo "+cpu +pids +memory" > "$CLUSTER_ROOT/cgroup.subtree_control"
 echo "200000 100000" > "$CLUSTER_ROOT/cpu.max"
-
-mkdir -p "$CLUSTER_ROOT/orchestrator"
-echo $$ > "$CLUSTER_ROOT/orchestrator/cgroup.procs"
 mkdir -p "logs"
 
 echo "Building and Verifying the base Alpine OS Image..."
@@ -61,7 +66,7 @@ python3 provisionLinux.py
 
 if [ "$1" == "shell" ]; then
     echo "Provisioning diagnostic Shell environment (Shard 1)..."
-    rm -rf "/tmp/vessel-root_1" 2>/dev/null
+    cleanup_rootfs "/tmp/vessel-root_1"
     cp -a "/tmp/vessel-root-base" "/tmp/vessel-root_1"
     exec ./container-launcher.sh shell 1
 else
@@ -70,7 +75,7 @@ else
     echo "Rapidly cloning and booting the MariaDB data tier..."
     for ((i=1; i<=$2; i++)); do
         echo "Cloning filesystem for Database Node $i..."
-        rm -rf "/tmp/vessel-root_$i" 2>/dev/null
+        cleanup_rootfs "/tmp/vessel-root_$i"
         cp -a "/tmp/vessel-root-base" "/tmp/vessel-root_$i"
         ./container-launcher.sh sql "$i" > "logs/db_node_${i}_boot.log" 2>&1 &
     done
@@ -80,7 +85,7 @@ else
     
     echo "Provisioning Spring Boot Application Router..."
     SPRING_NODE_ID=99
-    rm -rf "/tmp/vessel-root_$SPRING_NODE_ID" 2>/dev/null
+    cleanup_rootfs "/tmp/vessel-root_$SPRING_NODE_ID"
     cp -a "/tmp/vessel-root-base" "/tmp/vessel-root_$SPRING_NODE_ID"
 
     ./container-launcher.sh spring "$SPRING_NODE_ID" "$2" > "logs/spring_router_boot.log" 2>&1 &
