@@ -1,60 +1,43 @@
-import os
-import sys
-import ctypes
+#!/bin/bash
+if [ "$EUID" -ne 0 ]; then
+  echo "FATAL: Vessel requires root privileges."
+  exit 1
+fi
 
-CLONE_NEWNS = 0x00020000
-CLONE_NEWPID = 0x20000000
-CLONE_NEWNET = 0x40000000
-MS_REC = 0x4000
-MS_PRIVATE = 1 << 18
+if ! command -v ip &> /dev/null; then echo "Missing iproute2. Install it."; exit 1; fi
 
-libc = ctypes.CDLL("libc.so.6", use_errno=True)
+CLUSTER_ROOT="/sys/fs/cgroup/vessel_cluster"
 
-def apply_cgroup_constraints():
-    print("Provisioning cgroup constraints...")
+echo "Sweeping dirty network interfaces..."
+for i in {1..20} 99; do /sbin/ip link delete v-host$i 2>/dev/null || true; done
 
-    cgroup_path = "/sys/fs/cgroup/vessel_sandbox"
-    os.makedirs(cgroup_path, exist_ok=True)
+if ! /sbin/ip link show vessel_br0 > /dev/null 2>&1; then
+    /sbin/ip link add name vessel_br0 type bridge
+    /sbin/ip link set vessel_br0 up
+fi
 
-    with open(os.path.join(cgroup_path, "memory.max"), "w") as f:
-        f.write("500000000")
+/sbin/sysctl -w net.ipv4.ip_forward=1 > /dev/null
 
-    with open(os.path.join(cgroup_path, "cgroup.procs"), "w") as f:
-        f.write(str(os.getpid()))
+mkdir -p "$CLUSTER_ROOT"
+echo "+cpu +pids +memory" > "$CLUSTER_ROOT/cgroup.subtree_control" 2>/dev/null
 
-def isolate_namespaces():
-    print("Unsharing kernel namespaces...")
+echo "Building and Verifying base OS..."
+python3 provisionLinux.py
 
-    if libc.unshare(CLONE_NEWNS | CLONE_NEWPID | CLONE_NEWNET) != 0:
-        raise OSError(f"unshare failed: {os.strerror(ctypes.get_errno())}")
-
-    libc.mount(None, b"/", None, MS_REC | MS_PRIVATE, None)
-
-    libc.mount(b"proc", b"/proc", b"proc", 0, None)
-
-def launch_payload():
-    print("Forking into the new PID namespace...")
-
-    pid = os.fork()
-
-    if pid == 0:
-        java_path = "/usr/bin/java"
-        jar_path = "vessel-engine/target/vessel-engine-0.0.1-SNAPSHOT.jar"
-
-        os.execvp("/usr/bin/tini", ["tini", "--", java_path, "-jar", jar_path])
-    else:
-        try:
-            _, status = os.waitpid(pid, 0)
-            sys.exit(os.waitstatus_to_exitcode(status))
-        except KeyboardInterrupt:
-            print("\nShutting down vessel engine supervisor...")
-            sys.exit(0)
-
-if __name__ == "__main__":
-    if os.geteuid() != 0:
-        print("Fatal: Vessel supervisor requires root privileges.")
-        sys.exit(1)
-
-    apply_cgroup_constraints()
-    isolate_namespaces()
-    launch_payload()
+if [ "$1" == "shell" ]; then
+    rm -rf "/tmp/vessel-root_1"
+    cp -a "/tmp/vessel-root-base" "/tmp/vessel-root_1"
+    exec ./container-launcher.sh shell 1
+else
+    trap 'echo "Shutting down cluster..."; find /sys/fs/cgroup/vessel_cluster/vessel_sandbox_* -name "cgroup.kill" -exec sh -c "echo 1 > {}" \;; exit 0' SIGINT SIGTERM
+    for ((i=1; i<=$2; i++)); do
+        rm -rf "/tmp/vessel-root_$i"
+        cp -a "/tmp/vessel-root-base" "/tmp/vessel-root_$i"
+        ./container-launcher.sh sql "$i" &
+    done
+    sleep 5
+    rm -rf "/tmp/vessel-root_99"
+    cp -a "/tmp/vessel-root-base" "/tmp/vessel-root_99"
+    ./container-launcher.sh spring 99 "$2" &
+    wait
+fi
