@@ -24,6 +24,7 @@ RESTART_ALLOWED = [True]
 ACTIVE_PID = [0]
 MS_REC = 16384
 MS_PRIVATE = 262144
+MS_BIND = 4096
 
 
 def handle_signal(signum, frame):
@@ -164,23 +165,34 @@ def launch_vessel():
         os.write(net_pipe_w, b"G"); os.close(net_pipe_w)
         if mode == "shell":
             host_fd = sys.stdin.fileno()
-            st = termios.tcgetattr(host_fd)
-            tty.setraw(host_fd)
+            st = None
+            
+            if os.isatty(host_fd):
+                st = termios.tcgetattr(host_fd)
+                tty.setraw(host_fd)
+            else:
+                print("[WARNING] Input is not a TTY. Interactive shell features will be limited.", flush=True)
+                
             try:
                 while True:
                     r, _, _ = select.select([host_fd, master_fd], [], [])
                     if host_fd in r:
-                        ui = os.read(host_fd, 1024)
-                        if not ui: break
-                        os.write(master_fd, ui)
+                        try:
+                            ui = os.read(host_fd, 1024)
+                            if not ui: break
+                            os.write(master_fd, ui)
+                        except OSError:
+                            break
                     if master_fd in r:
                         try:
                             co = os.read(master_fd, 1024)
                             if not co: break
                             os.write(sys.stdout.fileno(), co)
-                        except OSError: break
+                        except OSError: 
+                            break
             finally:
-                termios.tcsetattr(host_fd, termios.TCSADRAIN, st)
+                if st is not None:
+                    termios.tcsetattr(host_fd, termios.TCSADRAIN, st)
         else:
             os.waitpid(pid, 0)
         return
@@ -218,6 +230,10 @@ def launch_vessel():
     do_mount("tmpfs", os.path.join(ROOTFS_DIR, "tmp"), "tmpfs")
     do_mount("tmpfs", os.path.join(ROOTFS_DIR, "dev"), "tmpfs")
     
+    pts_dir = os.path.join(ROOTFS_DIR, "dev/pts")
+    os.makedirs(pts_dir, exist_ok=True)
+    do_mount("/dev/pts", pts_dir, "none", MS_BIND)
+    
     os.chmod(os.path.join(ROOTFS_DIR, "tmp"), 0o1777)
     
     dev_dir = os.path.join(ROOTFS_DIR, "dev")
@@ -250,7 +266,7 @@ def launch_vessel():
             os.close(r); os.write(w, b"G"); os.close(w)
             _, status = os.waitpid(pid, 0)
             exit_code = os.waitstatus_to_exitcode(status)
-            print(f"[DEBUG] Child {pid} exited with code: {exit_code}", flush=True)
+            print(f"[DEBUG] Child {pid} exited with code:{exit_code}", end="\r", flush=True)
             if mode != "shell" and RESTART_ALLOWED[0]:
                 time.sleep(5); continue
             os._exit(0)
