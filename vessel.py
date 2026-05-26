@@ -38,8 +38,9 @@ def handle_signal(signum, frame):
 signal.signal(signal.SIGTERM, handle_signal)
 signal.signal(signal.SIGINT, handle_signal)
 
-def do_mount(source, target, fstype, flags=0):
-    res = libc.mount(source.encode(), target.encode(), fstype.encode(), flags, None)
+def do_mount(source, target, fstype, flags=0, data=None):
+    data_ptr = data.encode() if data else None
+    res = libc.mount(source.encode(), target.encode(), fstype.encode(), flags, data_ptr)
     if res != 0:
         err = ctypes.get_errno()
         if err != errno.EBUSY:
@@ -140,7 +141,15 @@ def launch_vessel():
         sys.exit(1)
     mode = sys.argv[1]
     shard_id = int(sys.argv[2])
+    
+    BASE_DIR = "/tmp/vessel-root-base"
+    UPPER_DIR = f"/tmp/vessel-upper_{shard_id}"
+    WORK_DIR = f"/tmp/vessel-work_{shard_id}"
     ROOTFS_DIR = f"/tmp/vessel-root_{shard_id}"
+
+    for d in [BASE_DIR, UPPER_DIR, WORK_DIR, ROOTFS_DIR]:
+        os.makedirs(d, exist_ok=True)
+        
     subprocess.run(["/sbin/ip", "link", "del", f"v-host{shard_id}"], stderr=subprocess.DEVNULL)
     flags = 0x00020000 | 0x04000000 | 0x20000000 | 0x40000000 
     ns_pipe_r, ns_pipe_w = os.pipe()
@@ -216,13 +225,17 @@ def launch_vessel():
     subprocess.run(["/sbin/ip", "link", "set", f"v-guest{shard_id}", "up"], check=True)
     subprocess.run(["/sbin/ip", "addr", "add", f"10.0.0.{shard_id+1}/24", "dev", f"v-guest{shard_id}"], check=True)
     
+    do_mount("none", "/", "none", MS_PRIVATE | MS_REC) 
+    
+    overlay_data = f"lowerdir={BASE_DIR},upperdir={UPPER_DIR},workdir={WORK_DIR}"
+    do_mount("overlay", ROOTFS_DIR, "overlay", 0, overlay_data)
+    
     for d in ["proc", "sys", "sys/fs/cgroup", "run", "tmp", "dev"]:
         target = os.path.join(ROOTFS_DIR, d)
         if os.path.islink(target):
             os.unlink(target)
         os.makedirs(target, exist_ok=True)
         
-    do_mount("none", "/", "none", MS_PRIVATE | MS_REC) 
     do_mount("proc", os.path.join(ROOTFS_DIR, "proc"), "proc")
     do_mount("sysfs", os.path.join(ROOTFS_DIR, "sys"), "sysfs")
     do_mount("cgroup2", os.path.join(ROOTFS_DIR, "sys/fs/cgroup"), "cgroup2")
