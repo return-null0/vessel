@@ -25,6 +25,18 @@ ACTIVE_PID = [0]
 MS_REC = 16384
 MS_PRIVATE = 262144
 
+
+def handle_signal(signum, frame):
+    if ACTIVE_PID[0] > 0:
+        try:
+            os.kill(ACTIVE_PID[0], signum)
+        except OSError:
+            pass
+    os._exit(0)
+
+signal.signal(signal.SIGTERM, handle_signal)
+signal.signal(signal.SIGINT, handle_signal)
+
 def do_mount(source, target, fstype, flags=0):
     res = libc.mount(source.encode(), target.encode(), fstype.encode(), flags, None)
     if res != 0:
@@ -92,8 +104,33 @@ def launch_telemetry_trigger():
             else:
                 self.send_response(404)
                 self.end_headers()
+                
+        def do_POST(self):
+            if self.path == '/kill':
+                self.send_response(200)
+                self.end_headers()
+                RESTART_ALLOWED[0] = False
+                if ACTIVE_PID[0] > 0:
+                    try:
+                        os.kill(ACTIVE_PID[0], signal.SIGTERM)
+                    except OSError:
+                        pass
+            elif self.path == '/restart':
+                self.send_response(200)
+                self.end_headers()
+                RESTART_ALLOWED[0] = True
+                if ACTIVE_PID[0] > 0:
+                    try:
+                        os.kill(ACTIVE_PID[0], signal.SIGTERM)
+                    except OSError:
+                        pass
+            else:
+                self.send_response(404)
+                self.end_headers()
+
         def log_message(self, format, *args):
             return
+            
     httpd = socketserver.TCPServer(("0.0.0.0", 9090), Handler)
     httpd.serve_forever()
 
@@ -209,11 +246,12 @@ def launch_vessel():
         r, w = os.pipe()
         pid = os.fork()
         if pid > 0:
+            ACTIVE_PID[0] = pid
             os.close(r); os.write(w, b"G"); os.close(w)
             _, status = os.waitpid(pid, 0)
             exit_code = os.waitstatus_to_exitcode(status)
             print(f"[DEBUG] Child {pid} exited with code: {exit_code}", flush=True)
-            if mode != "shell" and exit_code != 0 and RESTART_ALLOWED[0]:
+            if mode != "shell" and RESTART_ALLOWED[0]:
                 time.sleep(5); continue
             os._exit(0)
 

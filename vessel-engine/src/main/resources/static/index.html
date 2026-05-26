@@ -56,33 +56,48 @@
             try {
                 const response = await fetch('/api/cluster-state?t=' + Date.now());
                 const data = await response.json();
-                console.log("Cluster Data Received:", data);
+                
                 const grid = document.getElementById('sharded-view');
                 grid.innerHTML = '';
                 
                 data.forEach(shard => {
-                    console.log("Telemetry for " + shard.ip_address + ":", shard.telemetry);
-                    const card = document.createElement('div');
                     const isDown = shard.status === 'DOWN';
                     const isBooting = shard.status === 'BOOTING';
                     
+                    let recordHtml = '';
+                    if (shard.records && shard.records.length > 0) {
+                        recordHtml = shard.records.map(r => `<div class="record">${r.payload}</div>`).join('');
+                    } else if (isBooting) {
+                        recordHtml = '<div class="record" style="color:#f59e0b; text-align:center; padding-top:2rem; background:transparent;"><strong>Rebooting Container...</strong><br><small style="color:#94a3b8">Restoring database connection</small></div>';
+                    } else if (isDown) {
+                        recordHtml = '<div class="record" style="color:#ef4444; text-align:center; padding-top:2rem; background:transparent;"><strong>Node Offline</strong><br><small style="color:#94a3b8">Process terminated</small></div>';
+                    } else {
+                        recordHtml = '<div class="record" style="color:#ef4444">Awaiting sync...</div>';
+                    }
+
+                    const mem = shard.telemetry.memory_mb !== undefined ? shard.telemetry.memory_mb : 0;
+                    const cpu = shard.telemetry.cpu_usec !== undefined ? (shard.telemetry.cpu_usec / 1000000).toFixed(2) : '0.00';
+
+                    const card = document.createElement('div');
                     card.className = `shard-card ${isDown ? 'dead-node' : ''} ${isBooting ? 'restarting' : ''}`;
                     card.innerHTML = `
-    <div class="card-header">
-        <strong>IP: ${shard.ip_address}</strong>
-        ${!isDown ? `<div class="action-group">
-            <button class="btn-action btn-restart" onclick="killShard('${shard.ip_address}', 'restart')">RESTART</button>
-            <button class="btn-action btn-kill" onclick="killShard('${shard.ip_address}', 'kill')">KILL</button>
-        </div>` : ''}
-    </div>
-    <div class="telemetry-box">RAM: ${shard.telemetry.memory_mb || 0} MB | CPU: ${((shard.telemetry.cpu_usec || 0) / 1000000).toFixed(2)} s</div>
-    <div class="record-scroll">
-        ${shard.records ? shard.records.map(r => `<div class="record">${r.payload}</div>`).join('') : '<div class="record" style="color:#ef4444">Awaiting sync...</div>'}
-    </div>
-`;
+                        <div class="card-header">
+                            <strong>IP: ${shard.ip_address}</strong>
+                            ${!isDown ? `<div class="action-group">
+                                <button class="btn-action btn-restart" onclick="killShard('${shard.ip_address}', 'restart')">RESTART</button>
+                                <button class="btn-action btn-kill" onclick="killShard('${shard.ip_address}', 'kill')">KILL</button>
+                            </div>` : ''}
+                        </div>
+                        <div class="telemetry-box">RAM: ${mem} MB | CPU: ${cpu} s</div>
+                        <div class="record-scroll">
+                            ${recordHtml}
+                        </div>
+                    `;
                     grid.appendChild(card);
                 });
-            } catch (e) { console.error("Poll failed"); }
+            } catch (e) { 
+                console.error("Poll failed"); 
+            }
         }
 
         function triggerUnshard() {
@@ -98,10 +113,24 @@
         }
 
         function killShard(ip, action) {
-            if (action === 'kill' && !confirm("Are you sure you want to send SIGKILL to " + ip + "? Unsynced data will be lost.")) {
+            if (action === 'kill' && !confirm("Are you sure you want to send SIGTERM to " + ip + "? Unsynced data will be lost.")) {
                 return;
             }
-            fetch('/api/' + action + '?targetIp=' + ip, { method: 'POST' }).then(loadCluster);
+            const grid = document.getElementById('sharded-view');
+            const cards = grid.getElementsByClassName('shard-card');
+            for(let card of cards) {
+                if(card.innerHTML.includes(ip)) {
+                    if (action === 'restart') {
+                        card.classList.add('restarting');
+                    } else {
+                        card.classList.add('dead-node');
+                    }
+                }
+            }
+            
+            fetch('/api/' + action + '?targetIp=' + ip, { method: 'POST' }).then(() => {
+                setTimeout(loadCluster, 500); 
+            });
         }
 
         setInterval(loadCluster, 2000);
