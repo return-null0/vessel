@@ -16,9 +16,11 @@ import http.server
 import socketserver
 import datetime
 import shutil
+import socket
+import array
 
 libc = ctypes.CDLL("libc.so.6", use_errno=True)
-libc.mount.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_ulong, ctypes.c_void_p]
+libc.mount.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_ulong, ctypes.c_char_p]
 SIGSET_SIZE = 128 
 RESTART_ALLOWED = [True] 
 ACTIVE_PID = [0]
@@ -155,10 +157,12 @@ def launch_vessel():
     ns_pipe_r, ns_pipe_w = os.pipe()
     net_pipe_r, net_pipe_w = os.pipe()
     master_fd, slave_fd = None, None
-    if mode == "shell": master_fd, slave_fd = os.openpty()
+    parent_sock, child_sock = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+    master_fd, slave_fd = None, None
     pid = os.fork()
     
     if pid > 0:
+        child_sock.close()
         os.close(ns_pipe_w); os.close(net_pipe_r)
         if slave_fd is not None: os.close(slave_fd)
         try:
@@ -173,6 +177,16 @@ def launch_vessel():
         subprocess.run(["/sbin/ip", "link", "set", host_iface, "master", "vessel_br0"], check=True)
         os.write(net_pipe_w, b"G"); os.close(net_pipe_w)
         if mode == "shell":
+            msg, ancdata, flags, addr = parent_sock.recvmsg(1, socket.CMSG_LEN(4))
+            if ancdata:
+                cmsg_level, cmsg_type, cmsg_data = ancdata[0]
+                if cmsg_level == socket.SOL_SOCKET and cmsg_type == socket.SCM_RIGHTS:
+                    master_fd = array.array("i", cmsg_data)[0]
+                    
+            if master_fd is None:
+                print("[ERROR] Vessel child crashed during boot. Terminal FD not received.", flush=True)
+                sys.exit(1)
+                    
             host_fd = sys.stdin.fileno()
             st = None
             
@@ -245,7 +259,7 @@ def launch_vessel():
     
     pts_dir = os.path.join(ROOTFS_DIR, "dev/pts")
     os.makedirs(pts_dir, exist_ok=True)
-    do_mount("/dev/pts", pts_dir, "none", MS_BIND)
+    do_mount("devpts", pts_dir, "devpts", 0, "newinstance,ptmxmode=0666,mode=0620")
     
     os.chmod(os.path.join(ROOTFS_DIR, "tmp"), 0o1777)
     
@@ -255,7 +269,8 @@ def launch_vessel():
     libc.mknod(os.path.join(dev_dir, "random").encode(), 0o20666, os.makedev(1, 8))
     libc.mknod(os.path.join(dev_dir, "urandom").encode(), 0o20666, os.makedev(1, 9))
     libc.mknod(os.path.join(dev_dir, "tty").encode(), 0o20666, os.makedev(5, 0))
-    libc.mknod(os.path.join(dev_dir, "ptmx").encode(), 0o666, os.makedev(5, 2))
+    
+    os.symlink("pts/ptmx", os.path.join(dev_dir, "ptmx"))
     
     os.chdir(ROOTFS_DIR)
     os.chroot(".")
@@ -287,6 +302,16 @@ def launch_vessel():
         os.close(w); os.read(r, 1); os.close(r); os.setsid()
 
         if mode == "shell":
+            master_fd, slave_fd = os.openpty()
+        
+            ancdata = [(socket.SOL_SOCKET, socket.SCM_RIGHTS, array.array("i", [master_fd]).tobytes())]
+            child_sock.sendmsg([b"M"], ancdata)
+        
+            os.close(master_fd) 
+        
+            child_sock.close()
+            parent_sock.close()
+
             try:
                 fcntl.ioctl(slave_fd, termios.TIOCSCTTY, 0)
             except Exception:
