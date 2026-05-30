@@ -333,8 +333,9 @@ def launch_vessel():
             
             os.execvpe("/bin/sh", ["/bin/sh", "-i"], env)
         elif mode == "spring":
-            if not os.path.exists("/usr/bin/java"):
-                sys.stderr.write("FATAL: Java not found inside chroot.\n")
+            java_bin = "/usr/lib/jvm/java-21-openjdk/bin/java"
+            if not os.path.exists(java_bin):
+                sys.stderr.write(f"FATAL: Java binary not found at {java_bin} inside chroot.\n")
                 os._exit(1)
             if not os.path.exists("/app/vessel-engine.jar"):
                 sys.stderr.write("FATAL: /app/vessel-engine.jar not found.\n")
@@ -342,7 +343,7 @@ def launch_vessel():
                 
             print("[DEBUG] Launching Spring Boot Router...", flush=True)
             env = {"PATH": "/usr/bin:/bin", "JAVA_HOME": "/usr/lib/jvm/java-21-openjdk", "LD_LIBRARY_PATH": "/usr/lib"}
-            os.execvpe("/usr/bin/java", ["java", "-Xms64m", "-Xmx256m", "-Djava.io.tmpdir=/tmp", "-jar", "/app/vessel-engine.jar"], env)
+            os.execvpe(java_bin, ["java", "-Xms64m", "-Xmx256m", "-Djava.io.tmpdir=/tmp", "-jar", "/app/vessel-engine.jar"], env)
         elif mode == "sql":
             env = {"PATH": "/bin:/usr/bin:/sbin:/usr/sbin"}
             
