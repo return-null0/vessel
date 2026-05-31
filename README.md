@@ -116,7 +116,7 @@ The Node Health Dashboard aggregates live hardware metrics from isolated Cgroup 
         <summary>Process Anatomy: The Triple-Fork Hierarchy</summary>
         <img src="pics/process_tree.png" alt="Process Tree" width="800">
         <p>This section documents the execution boundary of the kernel-level virtualization. By inspecting the kernel's process tree, you can visually trace the isolation strategy.</p>
-        <p><strong>Screenshot Guidance:</strong> Run <code>ps axf</code> or <code>pstree -p</code> on the host machine. Capture the output that shows the Python Host Manager branching into the Bridge, then the Supervisor acting as PID 1 inside the sandbox, and finally the database payload as the child process.</p>
+        <p><strong>Screenshot Guidance:</strong> Run <code>ps axf</code> or <code>pstree -p</code> on the host machine. The output shows that the Python Host Manager is branching into the Bridge, then the Supervisor acting as PID 1 inside the sandbox, and finally the database payload as the child process.</p>
     </details>
 
 <details>
@@ -130,13 +130,13 @@ The Node Health Dashboard aggregates live hardware metrics from isolated Cgroup 
         <summary>Resource Caging: Cgroup v2 Isolation</summary>
         <img src="pics/cgroup_limits.png" alt="Cgroup Limits" width="800">
         <p>Vessel enforces strict resource ceilings by locking the container lifecycle into a specific cgroup delegate. This ensures memory and CPU pressure remains contained within the sandbox.</p>
-        <p><strong>Screenshot Guidance:</strong> Capture a view of the <code>/sys/fs/cgroup/</code> directory path for one of your active containers. Display the file contents of <code>memory.max</code> and <code>cpu.max</code> to provide tangible proof of the hardware ceilings you have enforced.</p>
+        <p><strong>Screenshot Guidance:</strong> Captured a view of the <code>/sys/fs/cgroup/</code> directory path for one of the active containers. Display the file contents of <code>memory.max</code> and <code>cpu.max</code> to provide tangible proof of the hardware ceilings enforced.</p>
     </details>
 
 <details>
         <summary>Observability: Real-Time Telemetry Dashboard</summary>
         <img src="pics/dashboard_view.png" alt="Telemetry Dashboard" width="800">
         <p>The Node Health Dashboard aggregates live hardware metrics from isolated cgroup filesystems. This centralized interface provides immediate visibility into container memory consumption and data equilibrium.</p>
-        <p><strong>Screenshot Guidance:</strong> Provide a clean capture of your browser dashboard while a shard is in the "Restarting" state. This highlights the UI integration with your custom telemetry threads and confirms that the dashboard is successfully polling the container side-channels.</p>
+        <p><strong>Screenshot Guidance:</strong> A clean capture of the browser dashboard while a shard is in the "Restarting" state. This highlights the UI integration with custom telemetry threads and confirms that the dashboard is successfully polling the container side-channels.</p>
     </details>
 </div>
