@@ -88,6 +88,8 @@ else
     cleanup_rootfs "/tmp/vessel-root_$SPRING_NODE_ID"
     cp -a "/tmp/vessel-root-base" "/tmp/vessel-root_$SPRING_NODE_ID"
 
+    export VESSEL_SHARD_COUNT="$2"
+    
     ./container-launcher.sh spring "$SPRING_NODE_ID" "$2" > "logs/spring_router_boot.log" 2>&1 &
     
     echo "Cluster is running. Spring Boot Router is booting on 10.0.0.100."

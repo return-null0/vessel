@@ -97,14 +97,18 @@ public class DashboardController {
     @PostMapping("/api/kill")
     public Map<String, String> executeHardwareKill(@RequestParam String targetIp) {
         jdbcTemplates.remove(targetIp);
-        try { restTemplate.postForObject("http://" + targetIp + ":9090/kill", null, String.class); } catch (Exception ignored) {}
+        try {
+            restTemplate.postForObject("http://" + targetIp + ":9090/kill", null, String.class);
+        } catch (Exception ignored) {}
         return Map.of("status", "Killed");
     }
 
     @PostMapping("/api/restart")
     public Map<String, String> executeRestart(@RequestParam String targetIp) {
         jdbcTemplates.remove(targetIp);
-        try { restTemplate.postForObject("http://" + targetIp + ":9090/restart", null, String.class); } catch (Exception ignored) {}
+        try {
+            restTemplate.postForObject("http://" + targetIp + ":9090/restart", null, String.class);
+        } catch (Exception ignored) {}
         return Map.of("status", "Restarting");
     }
 }

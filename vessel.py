@@ -342,7 +342,8 @@ def launch_vessel():
                 os._exit(1)
                 
             print("[DEBUG] Launching Spring Boot Router...", flush=True)
-            env = {"PATH": "/usr/bin:/bin", "JAVA_HOME": "/usr/lib/jvm/java-21-openjdk", "LD_LIBRARY_PATH": "/usr/lib"}
+            shard_count = os.environ.get("VESSEL_SHARD_COUNT", sys.argv[2])
+            env = {"PATH": "/usr/bin:/bin", "JAVA_HOME": "/usr/lib/jvm/java-21-openjdk", "LD_LIBRARY_PATH": "/usr/lib", "VESSEL_SHARD_COUNT": shard_count}
             os.execvpe(java_bin, ["java", "-Xms64m", "-Xmx256m", "-Djava.io.tmpdir=/tmp", "-jar", "/app/vessel-engine.jar"], env)
         elif mode == "sql":
             env = {"PATH": "/bin:/usr/bin:/sbin:/usr/sbin"}

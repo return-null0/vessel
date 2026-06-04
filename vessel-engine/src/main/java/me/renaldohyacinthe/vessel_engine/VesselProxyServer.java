@@ -52,8 +52,12 @@ public class VesselProxyServer implements CommandLineRunner {
             clientToTarget.start();
             targetToClient.start();
 
-            clientToTarget.join();
-            targetToClient.join();
+            try {
+                clientToTarget.join();
+                targetToClient.join();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
 
         } catch (java.net.SocketTimeoutException e) {
             System.err.println("[Vessel Proxy] Backend Shard " + targetShardIp + " is unresponsive.");
@@ -72,8 +76,11 @@ public class VesselProxyServer implements CommandLineRunner {
             }
         } catch (Exception e) {
         } finally {
-            try { s1.close(); } catch (Exception ex) {}
-            try { s2.close(); } catch (Exception ex) {}
+            try {
+                s1.close();
+                s2.close();
+            } catch (Exception ex) {
+            }
         }
     }
 }
