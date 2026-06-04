@@ -85,9 +85,10 @@
                 const data = await response.json();
                 
                 const grid = document.getElementById('sharded-view');
-                grid.innerHTML = '';
+                const activeIps = new Set();
                 
                 data.forEach(shard => {
+                    activeIps.add(shard.ip_address);
                     const isDown = shard.status === 'DOWN';
                     const isBooting = shard.status === 'BOOTING';
                     
@@ -120,34 +121,67 @@
                     const cpu = shard.telemetry && shard.telemetry.cpu_usec !== undefined ? (shard.telemetry.cpu_usec / 1000000).toFixed(2) : '0.00';
                     const statusColor = isDown ? '#ef4444' : isBooting ? '#f59e0b' : '#10b981';
 
-                    const card = document.createElement('div');
-                    card.className = `shard-card ${isDown ? 'dead-node' : ''} ${isBooting ? 'restarting' : ''}`;
-                    card.innerHTML = `
-                        <div class="card-header">
-                            <div style="display:flex; align-items:center; gap:10px;">
-                                <span class="status-dot" style="background:${statusColor}"></span>
-                                <strong style="font-size: 1.1rem; letter-spacing: 0.5px;">${shard.ip_address}</strong>
+                    const safeIp = shard.ip_address.replace(/\./g, '-');
+                    const cardId = 'shard-card-' + safeIp;
+                    let card = document.getElementById(cardId);
+
+                    if (!card) {
+                        card = document.createElement('div');
+                        card.id = cardId;
+                        card.className = `shard-card ${isDown ? 'dead-node' : ''} ${isBooting ? 'restarting' : ''}`;
+                        card.innerHTML = `
+                            <div class="card-header">
+                                <div style="display:flex; align-items:center; gap:10px;">
+                                    <span class="status-dot" style="background:${statusColor}"></span>
+                                    <strong style="font-size: 1.1rem; letter-spacing: 0.5px;">${shard.ip_address}</strong>
+                                </div>
+                                <div class="action-group" style="display: ${isDown ? 'none' : 'flex'}">
+                                    <button class="btn-action btn-restart" onclick="killShard('${shard.ip_address}', 'restart')">Restart</button>
+                                    <button class="btn-action btn-kill" onclick="killShard('${shard.ip_address}', 'kill')">Kill</button>
+                                </div>
                             </div>
-                            ${!isDown ? `<div class="action-group">
-                                <button class="btn-action btn-restart" onclick="killShard('${shard.ip_address}', 'restart')">Restart</button>
-                                <button class="btn-action btn-kill" onclick="killShard('${shard.ip_address}', 'kill')">Kill</button>
-                            </div>` : ''}
-                        </div>
-                        <div class="telemetry-box">
-                            <span>RAM: ${mem} MB</span>
-                            <span>CPU: ${cpu} s</span>
-                        </div>
-                        <div class="record-scroll">
-                            ${recordHtml}
-                        </div>
-                    `;
-                    grid.appendChild(card);
+                            <div class="telemetry-box">
+                                <span>RAM: ${mem} MB</span>
+                                <span>CPU: ${cpu} s</span>
+                            </div>
+                            <div class="record-scroll">
+                                ${recordHtml}
+                            </div>
+                        `;
+                        grid.appendChild(card);
+                    } else {
+                        card.className = `shard-card ${isDown ? 'dead-node' : ''} ${isBooting ? 'restarting' : ''}`;
+                        
+                        const dot = card.querySelector('.status-dot');
+                        if (dot) dot.style.background = statusColor;
+                        
+                        const actionGroup = card.querySelector('.action-group');
+                        if (actionGroup) actionGroup.style.display = isDown ? 'none' : 'flex';
+                        
+                        const telBox = card.querySelector('.telemetry-box');
+                        if (telBox) telBox.innerHTML = `<span>RAM: ${mem} MB</span><span>CPU: ${cpu} s</span>`;
+                        
+                        const recScroll = card.querySelector('.record-scroll');
+                        if (recScroll && recScroll.innerHTML !== recordHtml) {
+                            const currentScroll = recScroll.scrollTop;
+                            recScroll.innerHTML = recordHtml;
+                            recScroll.scrollTop = currentScroll;
+                        }
+                    }
                 });
+
+                Array.from(grid.children).forEach(child => {
+                    const ipId = child.id.replace('shard-card-', '').replace(/-/g, '.');
+                    if (!activeIps.has(ipId)) {
+                        grid.removeChild(child);
+                    }
+                });
+
             } catch (e) { 
                 console.error("Telemetry poll failed. Backend may be offline."); 
             }
         }
-
+        
         async function globalKill() {
             if (!confirm("CRITICAL: This will send SIGTERM to all shards in the Vessel cluster. Data in memory will be lost. Proceed?")) return;
             try {
