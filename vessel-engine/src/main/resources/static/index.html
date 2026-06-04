@@ -40,6 +40,8 @@
         
         @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
     </style>
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
 </head>
 <body>
     <div class="header">
@@ -69,126 +71,137 @@
     </table>
 
     <script>
+        let stompClient = null;
+
+        function connectWebSocket() {
+            const socket = new SockJS('/vessel-ws');
+            stompClient = Stomp.over(socket);
+            
+            stompClient.debug = null; 
+
+            stompClient.connect({}, function (frame) {
+                console.log('Connected to Vessel Engine WebSocket: ' + frame);
+                
+                stompClient.subscribe('/topic/telemetry', function (message) {
+                    const data = JSON.parse(message.body);
+                    renderCluster(data);
+                });
+            }, function(error) {
+                console.error("WebSocket connection lost. Reconnecting in 5 seconds...", error);
+                setTimeout(connectWebSocket, 5000);
+            });
+        }
+
         function showCluster() {
             document.getElementById('sharded-view').style.display = 'grid';
             document.getElementById('unsharded-view').style.display = 'none';
             document.getElementById('back-btn').style.display = 'none';
             document.getElementById('unshard-btn').style.display = 'inline-block';
-            loadCluster();
         }
 
-        async function loadCluster() {
+        function renderCluster(data) {
             if (document.getElementById('sharded-view').style.display === 'none') return;
             
-            try {
-                const response = await fetch('/api/cluster-state?t=' + Date.now());
-                const data = await response.json();
+            const grid = document.getElementById('sharded-view');
+            const activeIps = new Set();
+            
+            data.forEach(shard => {
+                activeIps.add(shard.ip_address);
+                const isDown = shard.status === 'DOWN';
+                const isBooting = shard.status === 'BOOTING';
                 
-                const grid = document.getElementById('sharded-view');
-                const activeIps = new Set();
-                
-                data.forEach(shard => {
-                    activeIps.add(shard.ip_address);
-                    const isDown = shard.status === 'DOWN';
-                    const isBooting = shard.status === 'BOOTING';
-                    
-                    let recordHtml = '';
-                    if (shard.records && shard.records.length > 0) {
-                        recordHtml = shard.records.map(r => {
-                            const text = typeof r === 'string' ? r : (r.payload || JSON.stringify(r));
-                            const splitIndex = text.indexOf(':');
-                            
-                            if (splitIndex > -1) {
-                                const key = text.substring(0, splitIndex).trim();
-                                const val = text.substring(splitIndex + 1).trim();
-                                return `
-                                    <div class="record-row">
-                                        <span class="record-key">${key}</span>
-                                        <span class="record-val">${val}</span>
-                                    </div>`;
-                            }
-                            return `<div class="record-row"><span class="record-val" style="width:100%; text-align:left;">${text}</span></div>`;
-                        }).join('');
-                    } else if (isBooting) {
-                        recordHtml = '<div style="color:#f59e0b; text-align:center; padding-top:3rem;"><strong>Rebooting Container...</strong></div>';
-                    } else if (isDown) {
-                        recordHtml = '<div style="color:#ef4444; text-align:center; padding-top:3rem;"><strong>Node Offline</strong></div>';
-                    } else {
-                        recordHtml = '<div style="color:#64748b; text-align:center; padding-top:3rem;">Awaiting telemetry sync...</div>';
-                    }
-
-                    const mem = shard.telemetry && shard.telemetry.memory_mb !== undefined ? shard.telemetry.memory_mb.toFixed(1) : '0.0';
-                    const cpu = shard.telemetry && shard.telemetry.cpu_usec !== undefined ? (shard.telemetry.cpu_usec / 1000000).toFixed(2) : '0.00';
-                    const statusColor = isDown ? '#ef4444' : isBooting ? '#f59e0b' : '#10b981';
-
-                    const safeIp = shard.ip_address.replace(/\./g, '-');
-                    const cardId = 'shard-card-' + safeIp;
-                    let card = document.getElementById(cardId);
-
-                    if (!card) {
-                        card = document.createElement('div');
-                        card.id = cardId;
-                        card.className = `shard-card ${isDown ? 'dead-node' : ''} ${isBooting ? 'restarting' : ''}`;
-                        card.innerHTML = `
-                            <div class="card-header">
-                                <div style="display:flex; align-items:center; gap:10px;">
-                                    <span class="status-dot" style="background:${statusColor}"></span>
-                                    <strong style="font-size: 1.1rem; letter-spacing: 0.5px;">${shard.ip_address}</strong>
-                                </div>
-                                <div class="action-group" style="display: ${isDown ? 'none' : 'flex'}">
-                                    <button class="btn-action btn-restart" onclick="killShard('${shard.ip_address}', 'restart')">Restart</button>
-                                    <button class="btn-action btn-kill" onclick="killShard('${shard.ip_address}', 'kill')">Kill</button>
-                                </div>
-                            </div>
-                            <div class="telemetry-box">
-                                <span>RAM: ${mem} MB</span>
-                                <span>CPU: ${cpu} s</span>
-                            </div>
-                            <div class="record-scroll">
-                                ${recordHtml}
-                            </div>
-                        `;
-                        grid.appendChild(card);
-                    } else {
-                        card.className = `shard-card ${isDown ? 'dead-node' : ''} ${isBooting ? 'restarting' : ''}`;
+                let recordHtml = '';
+                if (shard.records && shard.records.length > 0) {
+                    recordHtml = shard.records.map(r => {
+                        const text = typeof r === 'string' ? r : (r.payload || JSON.stringify(r));
+                        const splitIndex = text.indexOf(':');
                         
-                        const dot = card.querySelector('.status-dot');
-                        if (dot) dot.style.background = statusColor;
-                        
-                        const actionGroup = card.querySelector('.action-group');
-                        if (actionGroup) actionGroup.style.display = isDown ? 'none' : 'flex';
-                        
-                        const telBox = card.querySelector('.telemetry-box');
-                        if (telBox) telBox.innerHTML = `<span>RAM: ${mem} MB</span><span>CPU: ${cpu} s</span>`;
-                        
-                        const recScroll = card.querySelector('.record-scroll');
-                        if (recScroll && recScroll.innerHTML !== recordHtml) {
-                            const currentScroll = recScroll.scrollTop;
-                            recScroll.innerHTML = recordHtml;
-                            recScroll.scrollTop = currentScroll;
+                        if (splitIndex > -1) {
+                            const key = text.substring(0, splitIndex).trim();
+                            const val = text.substring(splitIndex + 1).trim();
+                            return `
+                                <div class="record-row">
+                                    <span class="record-key">${key}</span>
+                                    <span class="record-val">${val}</span>
+                                </div>`;
                         }
-                    }
-                });
+                        return `<div class="record-row"><span class="record-val" style="width:100%; text-align:left;">${text}</span></div>`;
+                    }).join('');
+                } else if (isBooting) {
+                    recordHtml = '<div style="color:#f59e0b; text-align:center; padding-top:3rem;"><strong>Rebooting Container...</strong></div>';
+                } else if (isDown) {
+                    recordHtml = '<div style="color:#ef4444; text-align:center; padding-top:3rem;"><strong>Node Offline</strong></div>';
+                } else {
+                    recordHtml = '<div style="color:#64748b; text-align:center; padding-top:3rem;">Awaiting telemetry sync...</div>';
+                }
 
-                Array.from(grid.children).forEach(child => {
-                    const ipId = child.id.replace('shard-card-', '').replace(/-/g, '.');
-                    if (!activeIps.has(ipId)) {
-                        grid.removeChild(child);
-                    }
-                });
+                const mem = shard.telemetry && shard.telemetry.memory_mb !== undefined ? shard.telemetry.memory_mb.toFixed(1) : '0.0';
+                const cpu = shard.telemetry && shard.telemetry.cpu_usec !== undefined ? (shard.telemetry.cpu_usec / 1000000).toFixed(2) : '0.00';
+                const statusColor = isDown ? '#ef4444' : isBooting ? '#f59e0b' : '#10b981';
 
-            } catch (e) { 
-                console.error("Telemetry poll failed. Backend may be offline."); 
-            }
+                const safeIp = shard.ip_address.replace(/\./g, '-');
+                const cardId = 'shard-card-' + safeIp;
+                let card = document.getElementById(cardId);
+
+                if (!card) {
+                    card = document.createElement('div');
+                    card.id = cardId;
+                    card.className = `shard-card ${isDown ? 'dead-node' : ''} ${isBooting ? 'restarting' : ''}`;
+                    card.innerHTML = `
+                        <div class="card-header">
+                            <div style="display:flex; align-items:center; gap:10px;">
+                                <span class="status-dot" style="background:${statusColor}"></span>
+                                <strong style="font-size: 1.1rem; letter-spacing: 0.5px;">${shard.ip_address}</strong>
+                            </div>
+                            <div class="action-group" style="display: ${isDown ? 'none' : 'flex'}">
+                                <button class="btn-action btn-restart" onclick="killShard('${shard.ip_address}', 'restart')">Restart</button>
+                                <button class="btn-action btn-kill" onclick="killShard('${shard.ip_address}', 'kill')">Kill</button>
+                            </div>
+                        </div>
+                        <div class="telemetry-box">
+                            <span>RAM: ${mem} MB</span>
+                            <span>CPU: ${cpu} s</span>
+                        </div>
+                        <div class="record-scroll">
+                            ${recordHtml}
+                        </div>
+                    `;
+                    grid.appendChild(card);
+                } else {
+                    card.className = `shard-card ${isDown ? 'dead-node' : ''} ${isBooting ? 'restarting' : ''}`;
+                    
+                    const dot = card.querySelector('.status-dot');
+                    if (dot) dot.style.background = statusColor;
+                    
+                    const actionGroup = card.querySelector('.action-group');
+                    if (actionGroup) actionGroup.style.display = isDown ? 'none' : 'flex';
+                    
+                    const telBox = card.querySelector('.telemetry-box');
+                    if (telBox) telBox.innerHTML = `<span>RAM: ${mem} MB</span><span>CPU: ${cpu} s</span>`;
+                    
+                    const recScroll = card.querySelector('.record-scroll');
+                    if (recScroll && recScroll.innerHTML !== recordHtml) {
+                        const currentScroll = recScroll.scrollTop;
+                        recScroll.innerHTML = recordHtml;
+                        recScroll.scrollTop = currentScroll;
+                    }
+                }
+            });
+
+            Array.from(grid.children).forEach(child => {
+                const ipId = child.id.replace('shard-card-', '').replace(/-/g, '.');
+                if (!activeIps.has(ipId)) {
+                    grid.removeChild(child);
+                }
+            });
         }
-        
+
         async function globalKill() {
             if (!confirm("CRITICAL: This will send SIGTERM to all shards in the Vessel cluster. Data in memory will be lost. Proceed?")) return;
             try {
                 const res = await fetch('/api/global-kill', { method: 'POST' });
                 if (res.ok) {
                     alert("Global shutdown sequence initiated.");
-                    loadCluster();
                 }
             } catch (e) {
                 alert("Failed to reach cluster router.");
@@ -218,13 +231,10 @@
             const actionText = action === 'kill' ? 'terminate' : 'reboot';
             if (action === 'kill' && !confirm(`Are you sure you want to ${actionText} node ${ip}?`)) return;
             
-            fetch('/api/' + action + '?targetIp=' + ip, { method: 'POST' }).then(() => {
-                setTimeout(loadCluster, 500); 
-            });
+            fetch('/api/' + action + '?targetIp=' + ip, { method: 'POST' });
         }
 
-        setInterval(loadCluster, 2000);
-        loadCluster();
+        connectWebSocket();
     </script>
 </body>
 </html>
