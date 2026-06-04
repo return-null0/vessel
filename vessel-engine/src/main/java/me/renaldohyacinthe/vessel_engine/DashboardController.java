@@ -1,6 +1,7 @@
 package me.renaldohyacinthe.vessel_engine;
 
 import org.springframework.boot.web.client.RestTemplateBuilder;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -110,5 +111,32 @@ public class DashboardController {
             restTemplate.postForObject("http://" + targetIp + ":9090/restart", null, String.class);
         } catch (Exception ignored) {}
         return Map.of("status", "Restarting");
+    }
+
+    @PostMapping("/api/global-kill")
+    public ResponseEntity<String> globalKill() {
+        System.out.println("[CRITICAL] Global cluster shutdown sequence initiated via Web UI.");
+        
+        for (String ip : shardIps) {
+            try {
+                System.out.println("Sending SIGTERM to Shard: " + ip);
+                restTemplate.postForEntity("http://" + ip + ":9090/kill", null, String.class);
+            } catch (Exception e) {
+                System.err.println("Shard " + ip + " is already offline or unreachable.");
+            }
+        }
+
+        new Thread(() -> {
+            try {
+                Thread.sleep(1000); 
+                System.out.println("[CRITICAL] Router supervisor shutting down container.");
+                restTemplate.postForEntity("http://127.0.0.1:9090/kill", null, String.class);
+                
+            } catch (Exception e) {
+                System.exit(0);
+            }
+        }).start();
+
+        return ResponseEntity.ok("{\"status\": \"Cluster shutdown initiated\"}");
     }
 }

@@ -96,15 +96,25 @@ def launch_telemetry_trigger():
     class Handler(http.server.SimpleHTTPRequestHandler):
         def do_GET(self):
             if self.path == '/telemetry':
-                os.kill(os.getpid(), 10)
+                try:
+                    os.kill(os.getpid(), 10)
+                except ProcessLookupError:
+                    pass
+                
                 time.sleep(0.15)
                 self.send_response(200)
                 self.send_header('Content-type', 'application/json')
                 self.send_header('Access-Control-Allow-Origin', '*')
                 self.end_headers()
+                
                 if os.path.exists("/telemetry.json"):
-                    with open("/telemetry.json", "rb") as f:
-                        self.wfile.write(f.read())
+                    try:
+                        with open("/telemetry.json", "rb") as f:
+                            self.wfile.write(f.read())
+                    except (BrokenPipeError, ConnectionResetError):
+                        pass
+                    except Exception as e:
+                        print(f"[ERROR] Telemetry write failed: {e}")
             else:
                 self.send_response(404)
                 self.end_headers()
@@ -361,17 +371,23 @@ def launch_vessel():
                             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                         );\n""")
                 
-                for i in range(1, 51):
-                    unique_key = f"shard_{shard_id}_idx_{i}"
-                    unique_payload = f"Payload item {i} generated for node {shard_id}"
-                    f.write(f"INSERT INTO cluster_data (shard_key, payload) VALUES ('{unique_key}', '{unique_payload}');\n")
+                f.write("TRUNCATE TABLE cluster_data;\n")
                 
+                diag_data = {
+                    "Shard ID": str(shard_id),
+                    "Boot Time": str(datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+                    "Kernel": subprocess.check_output(["uname", "-r"]).decode().strip(),
+                    "Mount Path": f"/tmp/vessel-root_{shard_id}",
+                    "Java Version": "21"
+                }
+                
+                for key, val in diag_data.items():
+                    combined_payload = f"{key}: {val}"
+                    f.write(f"INSERT INTO cluster_data (shard_key, payload) VALUES ('sys_{key.lower().replace(' ', '_')}', '{combined_payload}');\n")
+                    
             subprocess.run(["chown", "-R", "mysql:mysql", "/run/mysqld", "/var/lib/mysql"], env=env, check=False)
             if not os.path.exists("/var/lib/mysql/mysql"):
-                install_bin = "/usr/bin/mariadb-install-db"
-                if not os.path.exists(install_bin):
-                    install_bin = "/usr/bin/mysql_install_db"
-                
+                install_bin = "/usr/bin/mariadb-install-db" if os.path.exists("/usr/bin/mariadb-install-db") else "/usr/bin/mysql_install_db"
                 if not os.path.exists(install_bin):
                     sys.stderr.write("FATAL: MariaDB initialization binary not found.\n")
                     os._exit(1)
