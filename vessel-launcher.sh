@@ -12,11 +12,14 @@ if ! [[ ($# -eq 1 && "$1" == "shell") || ($# -eq 2 && "$1" == "sql" && "$2" -gt 
     exit 1
 fi
 
-cleanup_rootfs() {
-    local dir=$1
-    if [ -d "$dir" ]; then
-        grep "$dir" /proc/mounts | awk '{print $2}' | sort -r | xargs -r sudo umount -l 2>/dev/null
-        sudo rm -rf "$dir"
+cleanup_shard() {
+    local id=$1
+    local root="/tmp/vessel-root_$id"
+    if [ -d "$root" ]; then
+        grep "$root" /proc/mounts | awk '{print $2}' | sort -r | xargs -r sudo umount -l 2>/dev/null
+        sudo rm -rf "$root"
+        sudo rm -rf "/tmp/vessel-upper_$id"
+        sudo rm -rf "/tmp/vessel-work_$id"
     fi
 }
 
@@ -66,17 +69,15 @@ python3 provisionLinux.py
 
 if [ "$1" == "shell" ]; then
     echo "Provisioning diagnostic Shell environment (Shard 1)..."
-    cleanup_rootfs "/tmp/vessel-root_1"
-    cp -a "/tmp/vessel-root-base" "/tmp/vessel-root_1"
+    cleanup_shard 1
     exec ./container-launcher.sh shell 1
 else
     trap 'exec 2>/dev/null; echo "Shutting down cluster..."; trap - SIGINT SIGTERM; find /sys/fs/cgroup/vessel_cluster/vessel_sandbox_* -name "cgroup.kill" -exec sh -c "echo 1 > {}" \;; wait; echo "Cluster completely offline."; exit 0' SIGINT SIGTERM
 
     echo "Rapidly cloning and booting the MariaDB data tier..."
     for ((i=1; i<=$2; i++)); do
-        echo "Cloning filesystem for Database Node $i..."
-        cleanup_rootfs "/tmp/vessel-root_$i"
-        cp -a "/tmp/vessel-root-base" "/tmp/vessel-root_$i"
+        echo "Mounting OverlayFS for Database Node $i..."
+        cleanup_shard "$i"
         ./container-launcher.sh sql "$i" > "logs/db_node_${i}_boot.log" 2>&1 &
     done
     
@@ -85,8 +86,7 @@ else
     
     echo "Provisioning Spring Boot Application Router..."
     SPRING_NODE_ID=99
-    cleanup_rootfs "/tmp/vessel-root_$SPRING_NODE_ID"
-    cp -a "/tmp/vessel-root-base" "/tmp/vessel-root_$SPRING_NODE_ID"
+    cleanup_shard "$SPRING_NODE_ID"
 
     export VESSEL_SHARD_COUNT="$2"
     
