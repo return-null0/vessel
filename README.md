@@ -24,18 +24,23 @@ Vessel operates at the intersection of process orchestration and kernel-level re
 
 Vessel abandons inefficient full-directory copies in favor of OverlayFS. This copy-on-write (CoW) architecture layers a writable directory on top of a read-only directory, creating a unified virtual view for the process inside the namespace while saving massive amounts of disk space.
 
-1. **The Lower Directory (`/tmp/vessel-root-base`):** This is the immutable foundation. It contains the heavy OS binaries, the Java runtime, the Spring Boot JAR, and the MariaDB installation. All container shards share this exact same physical disk space.
-2. **The Upper Directory (`/tmp/vessel-upper_X`):** This is the unique, isolated scratchpad for each individual shard. Whenever a container attempts to create a new file, modify an existing file, or write to the database, those changes are written exclusively into this directory on the host machine.
-3. **The Work Directory (`/tmp/vessel-work_X`):** An empty, hidden staging area required by the Linux kernel. Before the kernel commits a file to the Upper directory, it writes it here first to guarantee atomic operations and prevent corruption during crashes.
-4. **The Merged Directory (`/tmp/vessel-root_X`):** The optical illusion exposed to the container. It is a virtual mount point where the kernel stacks the Upper layer on top of the Lower layer. When the container looks at `/`, it sees this merged view.
+1. **The Lower Directory (`/var/lib/vessel/root-base`):** This is the immutable foundation. It contains the heavy OS binaries, the Java runtime, the Spring Boot JAR, and the MariaDB installation. Every single container shard in the cluster shares this exact same physical disk space.
+2. **The Upper Directory (`/var/lib/vessel/upper_X`):** This is the unique, isolated scratchpad for each individual shard. Whenever a container attempts to create a new file, modify an existing file, or write to the database, those changes are written exclusively into this directory on the host machine.
+3. **The Work Directory (`/var/lib/vessel/work_X`):** An empty, hidden staging area required by the Linux kernel. Before the kernel commits a file to the Upper directory, it writes it here first to guarantee atomic operations and prevent corruption during crashes.
+4. **The Merged Directory (`/tmp/vessel-root_X`):** The optical illusion exposed to the container. It is a volatile virtual mount point residing in RAM where the kernel seamlessly stacks the Upper layer on top of the Lower layer. When the container looks at its root `/`, it sees this unified view.
 
 ### Validating the OverlayFS Isolation
 
 To prove the copy-on-write mechanics are functioning, you can perform three specific hardware-level validation tests using the interactive shell mode (`sudo ./vessel-launcher.sh shell`):
 
-1. **File Creation Isolation:** Create a file at the container root (`echo "Hello" > /secret.txt`). On the host machine, verify that `cat /tmp/vessel-root-base/secret.txt` fails, while `cat /tmp/vessel-upper_1/secret.txt` succeeds.
-2. **Copy-on-Write (CoW) Validation:** Append text to an existing base system file (`echo "127.0.0.1 custom" >> /etc/hosts`). On the host, verify the base layer file (`/tmp/vessel-root-base/etc/hosts`) remains untouched, while a brand new, modified copy appears in the upper layer (`/tmp/vessel-upper_1/etc/hosts`).
-3. **The Whiteout Deletion Test:** Delete a base file from within the container (`rm /etc/hostname`). On the host, run `ls -la /tmp/vessel-upper_1/etc/hostname`. You will observe a character device file with major/minor numbers of `0,0`. This "whiteout" file instructs the Merged layer to pretend the underlying base file no longer exists.
+1. **File Creation Isolation**
+Create a new file at the root of the container by executing `echo "Hello" > /secret.txt`. Drop back to your host machine and verify that running `cat /var/lib/vessel/root-base/secret.txt` fails, while `cat /var/lib/vessel/upper_1/secret.txt` successfully outputs the text.
+
+2. **Copy-on-Write (CoW) Validation**
+Append text to a base system file that already exists by executing `echo "127.0.0.1 custom" >> /etc/hosts` inside the container. On the host, verify the base layer file at `/var/lib/vessel/root-base/etc/hosts` remains completely untouched, while a brand new, modified copy has materialized in the upper layer at `/var/lib/vessel/upper_1/etc/hosts`.
+
+3. **The Whiteout Deletion Test**
+Delete a base system file from within the container by executing `rm /etc/hostname`. On the host, run `ls -la /var/lib/vessel/upper_1/etc/hostname`. Instead of a standard text file, you will observe a character device file with major/minor numbers of 0,0. This special "whiteout" file instructs the Merged layer to pretend the underlying base file no longer exists.
 
 ---
 
