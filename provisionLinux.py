@@ -11,8 +11,8 @@ alpine_arch = arch_map.get(current_arch, "x86_64")
 
 ALPINE_VERSION = "3.23"
 TARBALL_URL = f"https://dl-cdn.alpinelinux.org/alpine/v{ALPINE_VERSION}/releases/{alpine_arch}/alpine-minirootfs-{ALPINE_VERSION}.4-{alpine_arch}.tar.gz"
-ROOTFS_DIR = "/tmp/vessel-root-base"
-TARBALL_PATH = "/tmp/alpine-rootfs.tar.gz"
+ROOTFS_DIR = "/var/lib/vessel/root-base"
+TARBALL_PATH = "/var/lib/vessel/alpine-rootfs.tar.gz"
 
 def run_chroot(cmd):
     result = subprocess.run(["chroot", ROOTFS_DIR] + cmd)
@@ -36,6 +36,7 @@ def provision_rootfs():
     else:
         print(f"--- Starting fresh Vessel provisioning ({alpine_arch}) ---")
         os.makedirs(ROOTFS_DIR, exist_ok=True)
+        os.makedirs(os.path.dirname(TARBALL_PATH), exist_ok=True)
         
         print(f"Downloading Alpine minirootfs...")
         try:

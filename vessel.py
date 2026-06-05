@@ -154,10 +154,10 @@ def launch_vessel():
     mode = sys.argv[1]
     shard_id = int(sys.argv[2])
     
-    BASE_DIR = "/tmp/vessel-root-base"
-    UPPER_DIR = f"/tmp/vessel-upper_{shard_id}"
-    WORK_DIR = f"/tmp/vessel-work_{shard_id}"
-    ROOTFS_DIR = f"/tmp/vessel-root_{shard_id}"
+    BASE_DIR = "/var/lib/vessel/root-base"
+    UPPER_DIR = f"/var/lib/vessel/upper_{shard_id}"
+    WORK_DIR = f"/var/lib/vessel/work_{shard_id}"
+    ROOTFS_DIR = f"/var/run/vessel/root_{shard_id}"
 
     for d in [BASE_DIR, UPPER_DIR, WORK_DIR, ROOTFS_DIR]:
         os.makedirs(d, exist_ok=True)
@@ -377,7 +377,7 @@ def launch_vessel():
                     "Shard ID": str(shard_id),
                     "Boot Time": str(datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
                     "Kernel": subprocess.check_output(["uname", "-r"]).decode().strip(),
-                    "Mount Path": f"/tmp/vessel-root_{shard_id}",
+                    "Mount Path": f"/var/run/vessel/root_{shard_id}",
                     "Java Version": "21"
                 }
                 
