@@ -109,39 +109,41 @@ The Node Health Dashboard aggregates live hardware metrics from isolated Cgroup 
 
 <hr style="border: 0; border-top: 1px solid #334155; margin: 2rem 0;">
 
-<p style="line-height: 1.6; color: #cbd5e1;">
-    In conclusion, this project stands as a testament to the fact that containerization is NOT a proprietary magic trick, but an arrangement of native Linux kernel features. This project was built to strip away the abstractions of high-level container runtimes, forcing us to interface directly with the kernel's process scheduler, bridge networking, and resource caging APIs.
+<p style="line-height: 1.6; color: #104382;">
+In conclusion, this project stands as a testament to the fact that containerization is NOT a proprietary magic trick, but an arrangement of native Linux kernel features. This project was built to strip away the abstractions of container runtimes, forcing us to interface directly with the kernel's process scheduler, bridge networking, and resource caging APIs. <br><br> The following visual guide provides a bare-metal inspection of the engine. These captures demonstrate that the boundaries of our shards are not just logical, but physical constraints enforced by the kernel itself. Explore the anatomy of our daemonized process hierarchy, the layer 2 network bridge topology, the overlay filesystem, and the resource caging that holds the architecture together.
 </p>
 
-<p style="line-height: 1.6; color: #cbd5e1;">
-    The following visual guide provides a 'bare-metal' inspection of the engine. These captures demonstrate that the boundaries of our shards are not merely logical, but physical constraints enforced by the kernel itself. Explore the anatomy of our triple-fork lifecycle, the network bridge topology, and the resource caging that holds the architecture together.
-</p>
 <div class="vessel-docs">
-    <details> 
-        <summary>Process Anatomy: The Triple-Fork Hierarchy</summary>
+<details> 
+    <summary>Process Anatomy: The Daemonized Hierarchy</summary>
         <img src="pics/process_tree.png" alt="Process Tree" width="800">
-        <p>This section documents the execution boundary of the kernel-level virtualization. By inspecting the kernel's process tree, you can visually trace the isolation strategy.</p>
-        <p><strong>Screenshot Guidance:</strong> Run <code>ps axf</code> or <code>pstree -p</code> on the host machine. The output shows that the Python Host Manager is branching into the Bridge, then the Supervisor acting as PID 1 inside the sandbox, and finally the database payload as the child process.</p>
-    </details>
+        <p>This section documents the execution boundary of the kernel-level virtualization. By inspecting the process tree, you can visually trace the isolation strategy and the successful breakaway from the host terminal session.</p>
+
+</details>
 
 <details>
-        <summary>Network Topology: Layer 2 Bridge & Subnet</summary>
+        <summary>Network Topology: Virtual Ethernet & Layer 2 Bridge</summary>
         <img src="pics/network_topo.png" alt="Network Config" width="800">
-        <p>Scaling requires a robust routing topology. Vessel abandons simple network translation for a centralized software bridge operating natively at Layer 2.</p>
-        <p><strong>Screenshot Guidance:</strong> Run <code>ip addr show</code> or <code>brctl show</code> on the host. Capture the bridge interface that reveals all database shards residing on the same 10.0.0.0/24 subnet, proving native cross-container communication.</p>
-    </details>
+        <p>Scaling requires a robust routing topology. Vessel abandons simple local port forwarding for a centralized software bridge operating natively at Layer 2, mapping isolated network namespaces back to the host.</p>
+
+</details>
 
 <details>
-        <summary>Resource Caging: Cgroup v2 Isolation</summary>
+        <summary>Filesystem Isolation: OverlayFS Mount Namespaces</summary>
+        <img src="pics/mount_namespace.png" alt="OverlayFS Namespaces" width="800">
+        <p>Vessel isolates storage using copy-on-write overlay mounts strictly confined to private CLONE_NEWNS boundaries. This ensures containers can heavily modify their root directories without permanently mutating the shared Alpine base image on the host disk.</p>
+        
+</details>
+
+<details>
+        <summary>Resource Caging: Cgroup v2 Ceilings</summary>
         <img src="pics/cgroup_limits.png" alt="Cgroup Limits" width="800">
-        <p>Vessel enforces strict resource ceilings by locking the container lifecycle into a specific cgroup delegate. This ensures memory and CPU pressure remains contained within the sandbox.</p>
-        <p><strong>Screenshot Guidance:</strong> Captured a view of the <code>/sys/fs/cgroup/</code> directory path for one of the active containers. Display the file contents of <code>memory.max</code> and <code>cpu.max</code> to provide tangible proof of the hardware ceilings enforced.</p>
+        <p>Vessel enforces strict resource accounting by locking the container lifecycle into a specific cgroup delegate. This hardware-level caging ensures memory pressure and CPU cycles remain strictly monitored and contained.</p>
     </details>
 
 <details>
-        <summary>Observability: Real-Time Telemetry Dashboard</summary>
+        <summary>Observability: Telemetry Side-Channels</summary>
         <img src="pics/dashboard_view.png" alt="Telemetry Dashboard" width="800">
-        <p>The Node Health Dashboard aggregates live hardware metrics from isolated cgroup filesystems. This centralized interface provides immediate visibility into container memory consumption and data equilibrium.</p>
-        <p><strong>Screenshot Guidance:</strong> A clean capture of the browser dashboard while a shard is in the "Restarting" state. This highlights the UI integration with custom telemetry threads and confirms that the dashboard is successfully polling the container side-channels.</p>
+        <p>The Node Health Dashboard aggregates live hardware metrics from the isolated cgroup filesystems. This centralized interface utilizes POSIX signals to trigger background threads, providing immediate visibility into container equilibrium without interrupting the primary payload.</p>
     </details>
 </div>
