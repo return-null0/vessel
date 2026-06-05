@@ -15,11 +15,9 @@ ROOTFS_DIR = "/tmp/vessel-root-base"
 TARBALL_PATH = "/tmp/alpine-rootfs.tar.gz"
 
 def run_chroot(cmd):
-    result = subprocess.run(["chroot", ROOTFS_DIR] + cmd, capture_output=True, text=True)
+    result = subprocess.run(["chroot", ROOTFS_DIR] + cmd)
     if result.returncode != 0:
         print(f"FAILED: {' '.join(cmd)}")
-        print(f"STDOUT: {result.stdout}")
-        print(f"STDERR: {result.stderr}")
         raise subprocess.CalledProcessError(result.returncode, cmd)
     return result
 
@@ -37,8 +35,19 @@ def provision_rootfs():
         inject_network_config()
     else:
         print(f"--- Starting fresh Vessel provisioning ({alpine_arch}) ---")
-        os.makedirs(ROOTFS_DIR)
-        urllib.request.urlretrieve(TARBALL_URL, TARBALL_PATH)
+        os.makedirs(ROOTFS_DIR, exist_ok=True)
+        
+        print(f"Downloading Alpine minirootfs...")
+        try:
+            subprocess.run(
+                ["curl", "-L", "--progress-bar", "-o", TARBALL_PATH, TARBALL_URL], 
+                check=True
+            )
+        except subprocess.CalledProcessError:
+            print("FATAL: Failed to download Alpine rootfs. Check your internet connection or DNS.")
+            sys.exit(1)
+
+        print("Extracting rootfs...")
         subprocess.run(["tar", "-xpf", TARBALL_PATH, "-C", ROOTFS_DIR], check=True)
         os.remove(TARBALL_PATH)
         inject_network_config()
@@ -49,6 +58,7 @@ def provision_rootfs():
             subprocess.run(["mount", "--bind", f"/{d}", path], check=True)
 
         try:
+            print("Installing Alpine packages (this may take a minute)...")
             run_chroot(["apk", "update"])
             run_chroot(["apk", "add", "vim", "mariadb", "mc", "openjdk21", "libstdc++", "busybox", "gcompat"])
             run_chroot(["ln", "-sf", "/usr/lib/jvm/java-21-openjdk/bin/java", "/usr/bin/java"])
