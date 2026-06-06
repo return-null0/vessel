@@ -3,6 +3,7 @@ package me.renaldohyacinthe.vessel_engine;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -19,8 +20,23 @@ public class TelemetryBroadcaster {
 
     @Scheduled(fixedRate = 2000)
     public void broadcastClusterState() {
-        List<Map<String, Object>> currentState = dashboardController.getClusterState();
+        long startTime = System.currentTimeMillis();
         
-        messagingTemplate.convertAndSend("/topic/telemetry", currentState);
+        List<Map<String, Object>> shardData = dashboardController.getClusterState();
+        
+        long actualLatency = System.currentTimeMillis() - startTime;
+        long activeNodes = shardData.stream().filter(s -> "UP".equals(s.get("status"))).count();
+
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("shards", shardData);
+        
+        Map<String, Object> stats = new HashMap<>();
+        stats.put("activeNodes", activeNodes);
+        stats.put("totalNodes", shardData.size());
+        stats.put("actualLatencyMs", actualLatency);
+        
+        payload.put("stats", stats);
+
+        messagingTemplate.convertAndSend("/topic/telemetry", payload);
     }
 }
