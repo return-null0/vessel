@@ -1,19 +1,19 @@
 package me.renaldohyacinthe.vessel_engine;
 
-import org.springframework.context.annotation.Configuration;
+import org.springframework.stereotype.Component;
 import java.util.ArrayList;
 import java.util.List;
 
-@Configuration
+@Component
 public class ClusterConfig {
 
     public List<String> getActiveShardIps() {
-        String countStr = System.getenv("VESSEL_SHARD_COUNT");
-        int count = (countStr != null && !countStr.isEmpty()) ? Integer.parseInt(countStr) : 3;
-        
         List<String> ips = new ArrayList<>();
-        for (int i = 0; i < count; i++) {
-            ips.add("10.0.0." + (i + 2));
+        String shardCountStr = System.getenv("VESSEL_SHARD_COUNT");
+        int shardCount = (shardCountStr != null) ? Integer.parseInt(shardCountStr) : 10;
+
+        for (int i = 1; i <= shardCount; i++) {
+            ips.add("10.0.0." + (i + 1));
         }
         return ips;
     }

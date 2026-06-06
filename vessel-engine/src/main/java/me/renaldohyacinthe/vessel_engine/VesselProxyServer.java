@@ -21,19 +21,20 @@ public class VesselProxyServer implements CommandLineRunner {
 
     @Override
     public void run(String... args) throws Exception {
-        new Thread(() -> {
+        Thread.ofVirtual().start(() -> {
             try (ServerSocket serverSocket = new ServerSocket(3306)) {
                 System.out.println("[Vessel Proxy] Gateway balancing across " + shards.size() + " shards on port 3306...");
                 while (true) {
                     Socket clientSocket = serverSocket.accept();
                     int targetIndex = requestCounter.getAndIncrement() % shards.size();
                     String selectedShard = shards.get(targetIndex);
-                    new Thread(() -> handleClient(clientSocket, selectedShard)).start();
+                    
+                    Thread.ofVirtual().start(() -> handleClient(clientSocket, selectedShard));
                 }
             } catch (Exception e) {
                 System.err.println("[Vessel Proxy] TCP Server error: " + e.getMessage());
             }
-        }).start();
+        });
     }
 
     private void handleClient(Socket clientSocket, String targetShardIp) {
@@ -46,18 +47,11 @@ public class VesselProxyServer implements CommandLineRunner {
             InputStream targetIn = targetSocket.getInputStream();
             OutputStream targetOut = targetSocket.getOutputStream();
 
-            Thread clientToTarget = new Thread(() -> pipeStream(clientIn, targetOut, clientSocket, targetSocket));
-            Thread targetToClient = new Thread(() -> pipeStream(targetIn, clientOut, clientSocket, targetSocket));
+            Thread clientToTarget = Thread.ofVirtual().start(() -> pipeStream(clientIn, targetOut, clientSocket, targetSocket));
+            Thread targetToClient = Thread.ofVirtual().start(() -> pipeStream(targetIn, clientOut, clientSocket, targetSocket));
 
-            clientToTarget.start();
-            targetToClient.start();
-
-            try {
-                clientToTarget.join();
-                targetToClient.join();
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
+            clientToTarget.join();
+            targetToClient.join();
 
         } catch (java.net.SocketTimeoutException e) {
             System.err.println("[Vessel Proxy] Backend Shard " + targetShardIp + " is unresponsive.");
@@ -74,13 +68,12 @@ public class VesselProxyServer implements CommandLineRunner {
                 out.write(buffer, 0, bytesRead);
                 out.flush();
             }
-        } catch (Exception e) {
+        } catch (Exception ignored) {
         } finally {
             try {
                 s1.close();
                 s2.close();
-            } catch (Exception ex) {
-            }
+            } catch (Exception ignored) {}
         }
     }
 }
