@@ -153,6 +153,7 @@ def launch_vessel():
         sys.exit(1)
     mode = sys.argv[1]
     shard_id = int(sys.argv[2])
+    shard_count = int(sys.argv[3]) if len(sys.argv) > 3 else int(os.environ.get("VESSEL_SHARD_COUNT", 10))
     
     BASE_DIR = "/var/lib/vessel/root-base"
     UPPER_DIR = f"/var/lib/vessel/upper_{shard_id}"
@@ -352,9 +353,14 @@ def launch_vessel():
                 os._exit(1)
                 
             print("[DEBUG] Launching Spring Boot Router...", flush=True)
-            shard_count = os.environ.get("VESSEL_SHARD_COUNT", sys.argv[2])
-            env = {"PATH": "/usr/bin:/bin", "JAVA_HOME": "/usr/lib/jvm/java-21-openjdk", "LD_LIBRARY_PATH": "/usr/lib", "VESSEL_SHARD_COUNT": shard_count}
+            env = {
+                "PATH": "/usr/bin:/bin", 
+                "JAVA_HOME": "/usr/lib/jvm/java-21-openjdk", 
+                "LD_LIBRARY_PATH": "/usr/lib", 
+                "VESSEL_SHARD_COUNT": str(shard_count)
+            }
             os.execvpe(java_bin, ["java", "-Xms64m", "-Xmx256m", "-Djava.io.tmpdir=/tmp", "-jar", "/app/vessel-engine.jar"], env)
+
         elif mode == "sql":
             env = {"PATH": "/bin:/usr/bin:/sbin:/usr/sbin"}
             
@@ -364,6 +370,10 @@ def launch_vessel():
             with open("/var/lib/mysql/init.sql", "w") as f:
                 f.write("CREATE DATABASE IF NOT EXISTS appdata;\n")
                 f.write("USE appdata;\n")
+                f.write(f"SET GLOBAL auto_increment_increment = {shard_count};\n")
+                f.write(f"SET GLOBAL auto_increment_offset = {shard_id + 1};\n")
+                f.write(f"SET SESSION auto_increment_increment = {shard_count};\n")
+                f.write(f"SET SESSION auto_increment_offset = {shard_id + 1};\n")
                 f.write("""CREATE TABLE IF NOT EXISTS cluster_data (
                             id INT AUTO_INCREMENT PRIMARY KEY,
                             shard_key VARCHAR(255),
@@ -384,6 +394,12 @@ def launch_vessel():
                 for key, val in diag_data.items():
                     combined_payload = f"{key}: {val}"
                     f.write(f"INSERT INTO cluster_data (shard_key, payload) VALUES ('sys_{key.lower().replace(' ', '_')}', '{combined_payload}');\n")
+                    
+                f.write("INSERT INTO cluster_data (shard_key, payload) VALUES\n")
+                mock_records = []
+                for i in range(1, 251):
+                    mock_records.append(f"('usr_tx_{shard_id}_{i}', '{{\"action\": \"db_write\", \"latency_ms\": {10 + (i % 15)}, \"status\": \"success\"}}')")
+                f.write(",\n".join(mock_records) + ";\n")
                     
             subprocess.run(["chown", "-R", "mysql:mysql", "/run/mysqld", "/var/lib/mysql"], env=env, check=False)
             if not os.path.exists("/var/lib/mysql/mysql"):
