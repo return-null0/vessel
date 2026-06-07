@@ -369,11 +369,7 @@ def launch_vessel():
             
             with open("/var/lib/mysql/init.sql", "w") as f:
                 f.write("CREATE DATABASE IF NOT EXISTS appdata;\n")
-                f.write("USE appdata;\n")
-                f.write(f"SET GLOBAL auto_increment_increment = {shard_count};\n")
-                f.write(f"SET GLOBAL auto_increment_offset = {shard_id + 1};\n")
-                f.write(f"SET SESSION auto_increment_increment = {shard_count};\n")
-                f.write(f"SET SESSION auto_increment_offset = {shard_id + 1};\n")
+                f.write("USE appdata;\n")                
                 f.write("""CREATE TABLE IF NOT EXISTS cluster_data (
                             id INT AUTO_INCREMENT PRIMARY KEY,
                             shard_key VARCHAR(255),
@@ -382,6 +378,8 @@ def launch_vessel():
                         );\n""")
                 
                 f.write("TRUNCATE TABLE cluster_data;\n")
+                base_id = shard_id * 100000
+                current_id = base_id + 1
                 
                 diag_data = {
                     "Shard ID": str(shard_id),
@@ -393,13 +391,17 @@ def launch_vessel():
                 
                 for key, val in diag_data.items():
                     combined_payload = f"{key}: {val}"
-                    f.write(f"INSERT INTO cluster_data (shard_key, payload) VALUES ('sys_{key.lower().replace(' ', '_')}', '{combined_payload}');\n")
+                    f.write(f"INSERT INTO cluster_data (id, shard_key, payload) VALUES ({current_id}, 'sys_{shard_id}_{key.lower().replace(' ', '_')}', '{combined_payload}');\n")
+                    current_id += 1
                     
-                f.write("INSERT INTO cluster_data (shard_key, payload) VALUES\n")
+                f.write("INSERT INTO cluster_data (id, shard_key, payload) VALUES\n")
                 mock_records = []
                 for i in range(1, 251):
-                    mock_records.append(f"('usr_tx_{shard_id}_{i}', '{{\"action\": \"db_write\", \"latency_ms\": {10 + (i % 15)}, \"status\": \"success\"}}')")
+                    mock_records.append(f"({current_id}, 'usr_tx_{shard_id}_{i}', '{{\"action\": \"db_write\", \"latency_ms\": {10 + (i % 15)}, \"status\": \"success\"}}')")
+                    current_id += 1
                 f.write(",\n".join(mock_records) + ";\n")
+                
+                f.write(f"ALTER TABLE cluster_data AUTO_INCREMENT = {current_id + 1000};\n")
                     
             subprocess.run(["chown", "-R", "mysql:mysql", "/run/mysqld", "/var/lib/mysql"], env=env, check=False)
             if not os.path.exists("/var/lib/mysql/mysql"):

@@ -50,11 +50,14 @@ public class ScatterGatherService {
             jdbc.execute("SELECT 1"); 
             
             List<Map<String, Object>> records = jdbc.queryForList("SELECT shard_key, payload FROM cluster_data LIMIT 50");
+            Long count = jdbc.queryForObject("SELECT COUNT(*) FROM cluster_data", Long.class);
             data.put("records", records);
+            data.put("total_records", count != null ? count : 0);
             data.put("status", "ONLINE");
         } catch (Exception e) {
             jdbcTemplates.remove(ip);
             data.put("status", "OFFLINE");
+            data.put("total_records", 0); 
             data.put("error", e.getMessage());
         }
         return data;

@@ -18,7 +18,7 @@ public class TelemetryBroadcaster {
         this.dashboardController = dashboardController;
     }
 
-    @Scheduled(fixedRate = 2000)
+@Scheduled(fixedRate = 2000)
     public void broadcastClusterState() {
         long startTime = System.currentTimeMillis();
         
@@ -26,6 +26,10 @@ public class TelemetryBroadcaster {
         
         long actualLatency = System.currentTimeMillis() - startTime;
         long activeNodes = shardData.stream().filter(s -> "UP".equals(s.get("status"))).count();
+        
+        long totalRecords = shardData.stream()
+                .mapToLong(s -> s.get("total_records") != null ? ((Number) s.get("total_records")).longValue() : 0L)
+                .sum();
 
         Map<String, Object> payload = new HashMap<>();
         payload.put("shards", shardData);
@@ -34,6 +38,7 @@ public class TelemetryBroadcaster {
         stats.put("activeNodes", activeNodes);
         stats.put("totalNodes", shardData.size());
         stats.put("actualLatencyMs", actualLatency);
+        stats.put("totalRecords", totalRecords); // New metric
         
         payload.put("stats", stats);
 
