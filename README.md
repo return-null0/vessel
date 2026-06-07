@@ -47,9 +47,13 @@ Delete a base system file from within the container by executing `rm /etc/hostna
 ## The Control Plane: Spring Boot Integration
 The orchestration layer is augmented by a Spring Boot-based Control Plane. This backend service serves the interactive Dashboard and acts as a resilient proxy for all database sharding operations.
 
+The `ScatterGatherService` controls parallel data retrieval using Java 21 Virtual Threads. It queries all active shards simultaneously, aggregating database health, connection status, and record counts into a single cluster snapshot.
+
+The `TelemetryBroadcaster` utilizes STOMP over WebSockets to push real-time updates to the Dashboard. Operating on a 2-second poll heartbeat, it calculates aggregate cluster latency and node availability, ensuring the UI remains perfectly synced with the containers' states.
+
 1. **Serving the UI:** The DashboardController serves the interactive HTML interface, providing real-time cluster visualization.
 2. **Proxy Logic:** By abstracting the JDBC connections, the Spring engine allows for unified data aggregation (the "Unshard" functionality) across independently sharded MariaDB instances.
-3. **Resilience:** The backend implements auto-healing JdbcTemplate caches, which dynamically discard dead connections to terminated containers and recreate them upon node recovery.
+3. **Resilience:** The backend implements auto-refreshing JdbcTemplate caches, which dynamically discard dead connections to terminated containers and recreate them upon node recovery.
 
 ## Component Deep Dive
 
